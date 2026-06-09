@@ -1,0 +1,189 @@
+project:
+  name: credit-risk-platform
+  version: "1.0.0"
+
+random_seed: 42
+
+# ────────────────────────────────────────────────────────────────
+# Data
+# ────────────────────────────────────────────────────────────────
+data:
+  target_column: TARGET
+  id_column: SK_ID_CURR
+
+  split:
+    train_ratio: 0.70
+    val_ratio:   0.15
+    test_ratio:  0.15
+    stratify_by: TARGET
+
+  # Multi-table integration — all 7 Home Credit tables
+  tables:
+    application:
+      path: data/01_raw/application_train.csv
+      primary_key: SK_ID_CURR
+      required: true
+    bureau:
+      path: data/01_raw/bureau.csv
+      primary_key: SK_ID_BUREAU
+      foreign_key: SK_ID_CURR
+      required: false
+    bureau_balance:
+      path: data/01_raw/bureau_balance.csv
+      foreign_key: SK_ID_BUREAU
+      required: false
+    previous_application:
+      path: data/01_raw/previous_application.csv
+      primary_key: SK_ID_PREV
+      foreign_key: SK_ID_CURR
+      required: false
+    pos_cash_balance:
+      path: data/01_raw/POS_CASH_balance.csv
+      foreign_key: SK_ID_PREV
+      required: false
+    installments_payments:
+      path: data/01_raw/installments_payments.csv
+      foreign_key: SK_ID_PREV
+      required: false
+    credit_card_balance:
+      path: data/01_raw/credit_card_balance.csv
+      foreign_key: SK_ID_PREV
+      required: false
+
+# ────────────────────────────────────────────────────────────────
+# Feature engineering
+# ────────────────────────────────────────────────────────────────
+features:
+  missing_threshold: 0.5     # drop cols >50% null
+  numeric_imputation: median
+  categorical_imputation: most_frequent
+
+  categorical_columns:
+    - NAME_CONTRACT_TYPE
+    - CODE_GENDER
+    - FLAG_OWN_CAR
+    - FLAG_OWN_REALTY
+    - NAME_INCOME_TYPE
+    - NAME_EDUCATION_TYPE
+    - NAME_FAMILY_STATUS
+    - NAME_HOUSING_TYPE
+    - OCCUPATION_TYPE
+    - ORGANIZATION_TYPE
+
+# ────────────────────────────────────────────────────────────────
+# Models
+# ────────────────────────────────────────────────────────────────
+models:
+  default_model: gbt
+
+  imbalance:
+    method: class_weight   # class_weight | undersample | smote
+
+  logistic:
+    maxIter: 100
+    regParam: 0.01
+    elasticNetParam: 0.0
+    standardization: true
+
+  random_forest:
+    numTrees: 100
+    maxDepth: 10
+    maxBins: 64
+    subsamplingRate: 0.8
+    featureSubsetStrategy: sqrt
+
+  gbt:
+    maxIter: 100
+    maxDepth: 5
+    stepSize: 0.1
+    subsamplingRate: 0.8
+
+  tuning:
+    enabled: true
+    num_folds: 3
+    metric: areaUnderROC
+    grids:
+      gbt:
+        maxDepth: [3, 5, 7]
+        maxIter: [50, 100]
+      random_forest:
+        numTrees: [50, 100]
+        maxDepth: [5, 10]
+      logistic:
+        regParam: [0.001, 0.01, 0.1]
+        elasticNetParam: [0.0, 0.5]
+
+# ────────────────────────────────────────────────────────────────
+# MLflow
+# ────────────────────────────────────────────────────────────────
+mlflow:
+  tracking_uri: http://mlflow:5000
+  experiment_name: credit_risk_platform
+  registered_model_name: credit_risk_gbt
+  log_artifacts: true
+  log_models: true
+
+# ────────────────────────────────────────────────────────────────
+# Risk (Basel II)
+# ────────────────────────────────────────────────────────────────
+risk:
+  woe_iv:
+    n_bins: 10
+    min_iv_threshold: 0.02
+
+  segmentation:
+    pd_column: pd_score
+    thresholds:
+      low: 0.10
+      medium: 0.20
+      high: 0.35
+
+  expected_loss:
+    lgd_method: fixed
+    lgd_fixed: 0.45         # Basel II Foundation IRB
+    ead_column: AMT_CREDIT
+
+  stress_testing:
+    scenarios:
+      baseline:       {pd_multiplier: 1.0,  lgd_multiplier: 1.0,  description: "Current portfolio state"}
+      mild_recession: {pd_multiplier: 1.5,  lgd_multiplier: 1.1,  description: "GDP -2%, unemployment +3pp"}
+      severe:         {pd_multiplier: 2.5,  lgd_multiplier: 1.3,  description: "2008-style crisis"}
+      black_swan:     {pd_multiplier: 4.0,  lgd_multiplier: 1.5,  description: "Tail event, 99.9% percentile"}
+
+# ────────────────────────────────────────────────────────────────
+# Monitoring
+# ────────────────────────────────────────────────────────────────
+monitoring:
+  drift:
+    psi_threshold_warning: 0.10
+    psi_threshold_alert:   0.25
+    ks_pvalue_threshold:   0.05
+    monitored_features:
+      - AMT_CREDIT
+      - AMT_INCOME_TOTAL
+      - DAYS_BIRTH
+      - DAYS_EMPLOYED
+      - EXT_SOURCE_2
+      - EXT_SOURCE_3
+
+  performance:
+    auc_degradation_threshold: 0.03   # alert if AUC drops > 3pp
+
+# ────────────────────────────────────────────────────────────────
+# API
+# ────────────────────────────────────────────────────────────────
+api:
+  rate_limit: "100/minute"
+  request_timeout: 30
+  enable_shap: true        # set false for max throughput
+  max_payload_size_kb: 50
+
+# ────────────────────────────────────────────────────────────────
+# AWS
+# ────────────────────────────────────────────────────────────────
+aws:
+  region: us-east-1
+  s3_bucket: credit-risk-platform-models
+  lambda_function: credit-risk-scorer
+  lambda_memory_mb: 1024
+  lambda_timeout_s: 30

@@ -1,0 +1,126 @@
+name: bigdata-credit-risk
+
+services:
+  # ────────────────────────────────────────────────────────────
+  # Zookeeper — Kafka coordination service
+  # ────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: crp-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - bigdata-net
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # Kafka — distributed message broker
+  # ────────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: crp-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"       # External (host) access
+      - "29092:29092"     # Internal (container) access
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_BYTES: 1073741824  # 1 GB
+    networks:
+      - bigdata-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ────────────────────────────────────────────────────────────
+  # Kafka UI — web UI to inspect topics/messages
+  # ────────────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.1
+    container_name: crp-kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    networks:
+      - bigdata-net
+    restart: unless-stopped
+
+  # ────────────────────────────────────────────────────────────
+  # Spark + Jupyter — distributed compute + notebooks
+  # ────────────────────────────────────────────────────────────
+  spark:
+    image: jupyter/pyspark-notebook:spark-3.5.0
+    container_name: crp-spark
+    ports:
+      - "8888:8888"
+      - "4040:4040"
+    volumes:
+      - ../:/workspace
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      JUPYTER_TOKEN: ""
+      PYTHONPATH: /workspace
+      SPARK_OPTS: "--driver-memory=4g --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0"
+    working_dir: /workspace
+    command: >
+      start-notebook.sh
+      --NotebookApp.token=''
+      --NotebookApp.password=''
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - bigdata-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+
+  # ────────────────────────────────────────────────────────────
+  # MLflow — experiment tracking
+  # ────────────────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    container_name: crp-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts --serve-artifacts
+    networks:
+      - bigdata-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mlflow-data:
+
+networks:
+  bigdata-net:
+    driver: bridge
