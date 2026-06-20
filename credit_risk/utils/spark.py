@@ -31,8 +31,8 @@ def get_spark(app_name: str = "credit-risk-platform") -> SparkSession:
         .appName(app_name)
         .master("local[*]")
         # ── Memory & parallelism ─────────────────────────────────
-        .config("spark.driver.memory", "4g")
-        .config("spark.executor.memory", "4g")
+        .config("spark.driver.memory", "2g")
+        .config("spark.executor.memory", "1g")
         .config("spark.sql.shuffle.partitions", "50")
         .config("spark.default.parallelism", "8")
         # ── Adaptive Query Execution ─────────────────────────────

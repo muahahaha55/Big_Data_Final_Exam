@@ -95,7 +95,7 @@ def get_streaming_spark(app_name: str = "credit-risk-streaming") -> SparkSession
         .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0")
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-        .config("spark.driver.memory", "4g")
+        .config("spark.driver.memory", "1g")
         .config("spark.sql.streaming.checkpointLocation", "/tmp/spark-checkpoint")
         .getOrCreate()
     )
