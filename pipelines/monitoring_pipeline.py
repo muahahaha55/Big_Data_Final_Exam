@@ -13,6 +13,7 @@ from datetime import datetime
 
 from credit_risk.config import get_config, project_root
 from credit_risk.monitoring import generate_drift_report
+from credit_risk.monitoring.retraining_trigger import evaluate_retraining_trigger, print_decision
 from credit_risk.utils import get_spark, stop_spark
 from credit_risk.utils.logging import configure_logging, get_logger
 
@@ -73,7 +74,25 @@ def run_drift_check(
             print(f"    - {rec}")
         print("=" * 60 + "\n")
 
-        log.info("drift_check_completed", severity=report.overall_severity.value)
+        # ── Retraining trigger decision (paper-backed: WJARR 2025) ──
+        trigger_input = {
+            "features": [
+                {"feature": r.feature, "psi": r.psi}
+                for r in report.feature_results
+            ]
+        }
+        decision = evaluate_retraining_trigger(trigger_input)
+        print_decision(decision)
+
+        decision_path = project_root() / "data" / "08_reporting" / "retraining_decision.json"
+        with decision_path.open("w") as f:
+            json.dump(decision.to_dict(), f, indent=2, default=str)
+
+        log.info(
+            "drift_check_completed",
+            severity=report.overall_severity.value,
+            retraining_action=decision.action,
+        )
 
     except Exception:
         log.exception("drift_check_failed")
