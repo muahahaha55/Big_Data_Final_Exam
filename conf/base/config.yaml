@@ -187,3 +187,9 @@ aws:
   lambda_function: credit-risk-scorer
   lambda_memory_mb: 1024
   lambda_timeout_s: 30
+hdfs:
+  enabled: true
+  base_path: "hdfs://localhost:9000/user/vietphuongnguyen/credit_risk"
+  raw_path: "hdfs://localhost:9000/user/vietphuongnguyen/credit_risk/raw"
+  processed_path: "hdfs://localhost:9000/user/vietphuongnguyen/credit_risk/processed"
+  results_path: "hdfs://localhost:9000/user/vietphuongnguyen/credit_risk/results"
