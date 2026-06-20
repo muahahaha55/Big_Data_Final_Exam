@@ -140,7 +140,7 @@ Big_Data_Final_Exam/
 ├── infrastructure/           # Docker Compose (Kafka + Spark + MLflow)
 │   └── docker-compose.yml
 ├── notebooks/                # EDA notebook
-│   └── 01_eda.ipynb
+│   └── EDA_Home_Credit_Default_Risk.ipynb
 ├── conf/base/config.yaml     # Toàn bộ hyperparameters + thresholds
 ├── data/                     # 8-layer data catalog (Kedro-style)
 ├── docs/                     # Tài liệu kiến trúc
@@ -224,7 +224,7 @@ make stream-consume
 ### Mở notebook EDA
 
 ```bash
-jupyter lab notebooks/01_eda.ipynb
+jupyter lab notebooks/EDA_Home_Credit_Default_Risk.ipynb
 ```
 
 ---
