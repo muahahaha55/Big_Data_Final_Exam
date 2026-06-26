@@ -180,7 +180,7 @@ def _run_config(spark, label: str, included_tables: list[str]) -> dict:
         "roc_auc": m.get("roc_auc"),
         "pr_auc": m.get("pr_auc"),
         "ks_statistic": m.get("ks_statistic"),
-        "n_features": len(feature_cols),
+        "n_features": len(feature_cols.numeric) + len(feature_cols.categorical),
         "included_tables": included_tables,
     }
     log.info("ablation_config_done", config=label, **{
