@@ -815,4 +815,3 @@ Liệt kê tường minh là có chủ đích. Mỗi mục đều ánh xạ vào
 
 ---
 
-**Tinh thần trung thực kỹ thuật:** Mọi con số trong README này đều đến từ một lần chạy thực tế của repo trên VM. Những điều chưa đo được (vd. Δ ROC-AUC ablation, benchmark AQE) đều được nêu rõ là **chưa đo**, không suy diễn.
