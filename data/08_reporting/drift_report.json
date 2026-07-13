@@ -1,0 +1,89 @@
+{
+  "timestamp": "2026-06-24T10:01:55.942557",
+  "n_features_checked": 6,
+  "n_features_drifting": 0,
+  "overall_severity": "none",
+  "feature_results": [
+    {
+      "feature": "AMT_CREDIT",
+      "psi": 0.0001,
+      "ks_statistic": 0.0022,
+      "ks_pvalue": 0.994112,
+      "severity": "none",
+      "reference_mean": 599395.8277446027,
+      "current_mean": 597644.257768377,
+      "reference_std": 403201.80931972753,
+      "current_std": 400346.66351704195,
+      "sample_size_reference": 215523,
+      "sample_size_current": 45859
+    },
+    {
+      "feature": "AMT_INCOME_TOTAL",
+      "psi": 0.0001,
+      "ks_statistic": 0.0028,
+      "ks_pvalue": 0.920672,
+      "severity": "none",
+      "reference_mean": 168968.24188311686,
+      "current_mean": 169109.09004993565,
+      "reference_std": 274021.9011095646,
+      "current_std": 119430.01369573346,
+      "sample_size_reference": 215523,
+      "sample_size_current": 45859
+    },
+    {
+      "feature": "DAYS_BIRTH",
+      "psi": 0.0002,
+      "ks_statistic": 0.0041,
+      "ks_pvalue": 0.562849,
+      "severity": "none",
+      "reference_mean": -16038.613581845093,
+      "current_mean": -16033.03212019451,
+      "reference_std": 4359.868667642436,
+      "current_std": 4373.570880314608,
+      "sample_size_reference": 215523,
+      "sample_size_current": 45859
+    },
+    {
+      "feature": "DAYS_EMPLOYED",
+      "psi": 0.0003,
+      "ks_statistic": 0.004,
+      "ks_pvalue": 0.576816,
+      "severity": "none",
+      "reference_mean": 63660.56070581794,
+      "current_mean": 63706.91321223751,
+      "reference_std": 141149.01154578917,
+      "current_std": 141170.58154693816,
+      "sample_size_reference": 215523,
+      "sample_size_current": 45859
+    },
+    {
+      "feature": "EXT_SOURCE_2",
+      "psi": 0.0001,
+      "ks_statistic": 0.0024,
+      "ks_pvalue": 0.978038,
+      "severity": "none",
+      "reference_mean": 0.5143209020746101,
+      "current_mean": 0.5145481459507735,
+      "reference_std": 0.19100346055553552,
+      "current_std": 0.19137233784519073,
+      "sample_size_reference": 215049,
+      "sample_size_current": 45764
+    },
+    {
+      "feature": "EXT_SOURCE_3",
+      "psi": 0.0003,
+      "ks_statistic": 0.0034,
+      "ks_pvalue": 0.877446,
+      "severity": "none",
+      "reference_mean": 0.5103164543067167,
+      "current_mean": 0.5104660923301101,
+      "reference_std": 0.19506252149562067,
+      "current_std": 0.19484392865027836,
+      "sample_size_reference": 172928,
+      "sample_size_current": 36607
+    }
+  ],
+  "recommendations": [
+    "No significant drift detected. Continue routine monitoring."
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "portfolio_overview": {
+    "total_customers": 45859,
+    "total_ead_million": 27407.37,
+    "total_expected_loss_million": 950.72,
+    "portfolio_el_rate": 0.0347,
+    "portfolio_el_rate_pct": 3.469,
+    "interpretation": "Moderate risk (3-5%)",
+    "avg_pd": 0.0829,
+    "avg_lgd": 0.45,
+    "actual_default_rate_pct": 8.2
+  },
+  "risk_tier_breakdown": [
+    {
+      "risk_tier": "Low Risk",
+      "count": 34822,
+      "pct_customers": 75.93,
+      "ead_m": 21629.76,
+      "el_m": 455.88,
+      "el_rate_pct": 2.11,
+      "avg_pd": 0.0478
+    },
+    {
+      "risk_tier": "Medium Risk",
+      "count": 7465,
+      "pct_customers": 16.28,
+      "ead_m": 3987.75,
+      "el_m": 247.16,
+      "el_rate_pct": 6.2,
+      "avg_pd": 0.1382
+    },
+    {
+      "risk_tier": "High Risk",
+      "count": 2630,
+      "pct_customers": 5.73,
+      "ead_m": 1325.93,
+      "el_m": 153.26,
+      "el_rate_pct": 11.56,
+      "avg_pd": 0.2569
+    },
+    {
+      "risk_tier": "Very High Risk",
+      "count": 942,
+      "pct_customers": 2.05,
+      "ead_m": 463.93,
+      "el_m": 94.42,
+      "el_rate_pct": 20.35,
+      "avg_pd": 0.4549
+    }
+  ],
+  "capital_estimate": {
+    "expected_loss_million": 950.72,
+    "unexpected_loss_million": 2852.17,
+    "economic_capital_million": 4278.25
+  },
+  "stress_test": {
+    "n_customers": 45859,
+    "base_el_million": 950.72,
+    "scenarios": [
+      {
+        "scenario": "baseline",
+        "description": "Current portfolio state",
+        "pd_multiplier": 1.0,
+        "lgd_multiplier": 1.0,
+        "total_ead_million": 27407.37,
+        "total_el_million": 950.72,
+        "el_rate_pct": 3.469,
+        "avg_pd": 0.0829,
+        "avg_lgd": 0.45,
+        "customers_high_risk": 3572,
+        "customers_default_zone": 229,
+        "capital_required_estimate_million": 2852.17
+      },
+      {
+        "scenario": "mild_recession",
+        "description": "GDP -2%, unemployment +3pp",
+        "pd_multiplier": 1.5,
+        "lgd_multiplier": 1.1,
+        "total_ead_million": 27407.37,
+        "total_el_million": 1567.68,
+        "el_rate_pct": 5.72,
+        "avg_pd": 0.1242,
+        "avg_lgd": 0.495,
+        "customers_high_risk": 7255,
+        "customers_default_zone": 1082,
+        "capital_required_estimate_million": 4703.05
+      },
+      {
+        "scenario": "severe",
+        "description": "2008-style crisis",
+        "pd_multiplier": 2.5,
+        "lgd_multiplier": 1.3,
+        "total_ead_million": 27407.37,
+        "total_el_million": 3047.41,
+        "el_rate_pct": 11.119,
+        "avg_pd": 0.2039,
+        "avg_lgd": 0.585,
+        "customers_high_risk": 14799,
+        "customers_default_zone": 3572,
+        "capital_required_estimate_million": 9142.22
+      },
+      {
+        "scenario": "black_swan",
+        "description": "Tail event, 99.9% percentile",
+        "pd_multiplier": 4.0,
+        "lgd_multiplier": 1.5,
+        "total_ead_million": 27407.37,
+        "total_el_million": 5376.49,
+        "el_rate_pct": 19.617,
+        "avg_pd": 0.3099,
+        "avg_lgd": 0.675,
+        "customers_high_risk": 24623,
+        "customers_default_zone": 8014,
+        "capital_required_estimate_million": 16129.48
+      }
+    ],
+    "comparison": {
+      "baseline": {
+        "el_multiplier_vs_baseline": 1.0,
+        "additional_loss_million": 0.0
+      },
+      "mild_recession": {
+        "el_multiplier_vs_baseline": 1.65,
+        "additional_loss_million": 616.96
+      },
+      "severe": {
+        "el_multiplier_vs_baseline": 3.21,
+        "additional_loss_million": 2096.68
+      },
+      "black_swan": {
+        "el_multiplier_vs_baseline": 5.66,
+        "additional_loss_million": 4425.77
+      }
+    }
+  },
+  "model_version": "2",
+  "model_stage": "Production",
+  "generated_at": "2026-06-24T10:00:12.906979"
+}

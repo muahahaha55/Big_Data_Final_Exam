@@ -1,0 +1,124 @@
+[
+  {
+    "feature": "NAME_CONTRACT_TYPE",
+    "js_divergence": 0.0019,
+    "severity": "none",
+    "n_categories_reference": 2,
+    "n_categories_current": 2,
+    "new_categories": []
+  },
+  {
+    "feature": "CODE_GENDER",
+    "js_divergence": 0.0044,
+    "severity": "none",
+    "n_categories_reference": 3,
+    "n_categories_current": 3,
+    "new_categories": []
+  },
+  {
+    "feature": "FLAG_OWN_CAR",
+    "js_divergence": 0.0019,
+    "severity": "none",
+    "n_categories_reference": 2,
+    "n_categories_current": 2,
+    "new_categories": []
+  },
+  {
+    "feature": "FLAG_OWN_REALTY",
+    "js_divergence": 0.002,
+    "severity": "none",
+    "n_categories_reference": 2,
+    "n_categories_current": 2,
+    "new_categories": []
+  },
+  {
+    "feature": "NAME_TYPE_SUITE",
+    "js_divergence": 0.0058,
+    "severity": "none",
+    "n_categories_reference": 7,
+    "n_categories_current": 7,
+    "new_categories": []
+  },
+  {
+    "feature": "NAME_INCOME_TYPE",
+    "js_divergence": 0.0021,
+    "severity": "none",
+    "n_categories_reference": 8,
+    "n_categories_current": 8,
+    "new_categories": []
+  },
+  {
+    "feature": "NAME_EDUCATION_TYPE",
+    "js_divergence": 0.004,
+    "severity": "none",
+    "n_categories_reference": 5,
+    "n_categories_current": 5,
+    "new_categories": []
+  },
+  {
+    "feature": "NAME_FAMILY_STATUS",
+    "js_divergence": 0.0047,
+    "severity": "none",
+    "n_categories_reference": 5,
+    "n_categories_current": 6,
+    "new_categories": [
+      "Unknown"
+    ]
+  },
+  {
+    "feature": "NAME_HOUSING_TYPE",
+    "js_divergence": 0.005,
+    "severity": "none",
+    "n_categories_reference": 6,
+    "n_categories_current": 6,
+    "new_categories": []
+  },
+  {
+    "feature": "OCCUPATION_TYPE",
+    "js_divergence": 0.0077,
+    "severity": "none",
+    "n_categories_reference": 18,
+    "n_categories_current": 18,
+    "new_categories": []
+  },
+  {
+    "feature": "WEEKDAY_APPR_PROCESS_START",
+    "js_divergence": 0.0043,
+    "severity": "none",
+    "n_categories_reference": 7,
+    "n_categories_current": 7,
+    "new_categories": []
+  },
+  {
+    "feature": "FONDKAPREMONT_MODE",
+    "js_divergence": 0.0098,
+    "severity": "none",
+    "n_categories_reference": 4,
+    "n_categories_current": 4,
+    "new_categories": []
+  },
+  {
+    "feature": "HOUSETYPE_MODE",
+    "js_divergence": 0.0029,
+    "severity": "none",
+    "n_categories_reference": 3,
+    "n_categories_current": 3,
+    "new_categories": []
+  },
+  {
+    "feature": "WALLSMATERIAL_MODE",
+    "js_divergence": 0.0107,
+    "severity": "none",
+    "n_categories_reference": 7,
+    "n_categories_current": 7,
+    "new_categories": []
+  },
+  {
+    "feature": "EMERGENCYSTATE_MODE",
+    "js_divergence": 0.0027,
+    "severity": "none",
+    "n_categories_reference": 2,
+    "n_categories_current": 2,
+    "new_categories": []
+  }
+]
