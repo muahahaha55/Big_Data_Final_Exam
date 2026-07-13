@@ -230,10 +230,11 @@ Big_Data_Final_Exam/
 │   ├── 05_model_input/             # Split train/val/test
 │   ├── 06_models/                  # Artifacts MLflow (gắn registry)
 │   ├── 07_model_output/            # Điểm PD danh mục
-│   └── 08_reporting/               # ⭐ Báo cáo JSON cuối (commit vào repo):
-│                                   #   portfolio_risk_report.json
-│                                   #   stress_test_report.json
+│   └── 08_reporting/               # ⭐ Final JSON reports (committed):
+│                                   #   portfolio_risk_report.json (incl. stress tests)
 │                                   #   drift_report.json
+│                                   #   categorical_drift_report.json
+│                                   #   feature_ranking_report.json
 │                                   #   retraining_decision.json
 │
 ├── documents/
@@ -566,7 +567,7 @@ HDFS NameNode `:9870` · YARN RM `:8088` · Spark UI `:4040` · MLflow `:5000` �
 | Quyết định drift | `CONTINUE_MONITORING` (không drift) | ✅ Báo cáo JSON |
 | Đặc trưng Kruskal–Wallis đứng đầu | EXT_SOURCE_3 (H = 4.672,97) | ✅ MLflow |
 
-Bằng chứng chính: bốn báo cáo JSON trong `data/08_reporting/` và báo cáo kỹ thuật trong `documents/`.
+Bằng chứng chính: 5 báo cáo JSON trong `data/08_reporting/` và báo cáo kỹ thuật trong `documents/`.
 
 ---
 
