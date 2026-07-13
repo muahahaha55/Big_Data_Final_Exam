@@ -1,115 +1,100 @@
-# Big Data Final Exam — Credit Risk Modeling on Apache Spark, Kafka & Hadoop
+# Mô hình hóa Rủi ro Tín dụng trên Apache Spark, Kafka & Hadoop
 
-> Hệ thống xử lý đầu cuối phân tán (HDFS + Spark + Kafka + MLflow) cho bài toán mô hình hóa rủi ro tín dụng trên bộ dữ liệu **Home Credit Default Risk** (307,511 khách hàng, 7 bảng quan hệ, ~58.4 triệu hàng tổng cộng).
+![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)
+![Spark](https://img.shields.io/badge/Apache%20Spark-3.5-E25A1C?logo=apachespark&logoColor=white)
+![Kafka](https://img.shields.io/badge/Apache%20Kafka-3.5-231F20?logo=apachekafka)
+![Hadoop](https://img.shields.io/badge/Hadoop-3.3.6-66CCFF?logo=apachehadoop&logoColor=black)
+![MLflow](https://img.shields.io/badge/MLflow-2.9-0194E2?logo=mlflow&logoColor=white)
 
-**Sinh viên:** Nguyễn Việt Phương
-**MSSV:** 24022431
+> Hệ thống rủi ro tín dụng phân tán đầu-cuối trên bộ dữ liệu **Home Credit Default Risk** (307.511 hồ sơ vay, 7 bảng quan hệ, ~58,4 triệu dòng): ETL đa bảng và huấn luyện GBT trên Spark/HDFS/YARN, phân tích rủi ro danh mục theo Basel II (tổn thất kỳ vọng, vốn kinh tế, stress testing vĩ mô), đường chấm điểm streaming Kafka + Spark Structured Streaming, và chính sách tái huấn luyện khi phát hiện drift (PSI + KS + Jensen–Shannon).
+
+**Tác giả:** Nguyễn Việt Phương · Bài tập lớn học phần Big Data
 
 ---
 
 ## Mục lục
 
-1. [Bài toán và động lực Big Data](#1-bài-toán-và-động-lực-big-data)
-2. [Bộ dữ liệu Home Credit](#2-bộ-dữ-liệu-home-credit)
+1. [Bài toán & Lý do dùng Big Data](#1-bài-toán--lý-do-dùng-big-data)
+2. [Dữ liệu](#2-dữ-liệu)
 3. [Kiến trúc hệ thống](#3-kiến-trúc-hệ-thống)
-4. [Stack công nghệ](#4-stack-công-nghệ)
+4. [Tech Stack](#4-tech-stack)
 5. [Cấu trúc dự án](#5-cấu-trúc-dự-án)
-6. [Quy trình ETL đa bảng](#6-quy-trình-etl-đa-bảng)
-7. [Kỹ thuật đặc trưng và huấn luyện](#7-kỹ-thuật-đặc-trưng-và-huấn-luyện)
+6. [ETL đa bảng](#6-etl-đa-bảng)
+7. [Xây dựng đặc trưng & Huấn luyện](#7-xây-dựng-đặc-trưng--huấn-luyện)
 8. [Phân tích rủi ro Basel II](#8-phân-tích-rủi-ro-basel-ii)
-9. [Hệ thống streaming Kafka + Spark](#9-hệ-thống-streaming-kafka--spark)
-10. [Giám sát mô hình và drift detection](#10-giám-sát-mô-hình-và-drift-detection)
-11. [Hướng dẫn chạy](#11-hướng-dẫn-chạy)
+9. [Kafka + Spark Streaming](#9-kafka--spark-streaming)
+10. [Giám sát mô hình & Phát hiện drift](#10-giám-sát-mô-hình--phát-hiện-drift)
+11. [Khởi động nhanh](#11-khởi-động-nhanh)
 12. [Kết quả thực nghiệm](#12-kết-quả-thực-nghiệm)
-13. [Hạn chế trung thực](#13-hạn-chế-trung-thực)
+13. [Hạn chế đã biết & Lộ trình](#13-hạn-chế-đã-biết--lộ-trình)
 14. [Tài liệu tham khảo](#14-tài-liệu-tham-khảo)
 
 ---
 
-## 1. Bài toán và động lực Big Data
+## 1. Bài toán & Lý do dùng Big Data
 
-### Bài toán
+**Nhiệm vụ:** dự đoán **xác suất vỡ nợ (PD — Probability of Default)** cho từng hồ sơ vay từ nhiều nguồn dữ liệu quan hệ, sau đó lượng hóa rủi ro danh mục theo khung **Basel II** (tổn thất kỳ vọng, tổn thất ngoài kỳ vọng, vốn kinh tế).
 
-Dự đoán **Xác suất Vỡ nợ (PD — Probability of Default)** của khách hàng vay từ nhiều nguồn dữ liệu quan hệ, sau đó định lượng rủi ro danh mục theo khung **Basel II** (Expected Loss, Unexpected Loss, vốn kinh tế).
+Đây không phải bài toán "pandas vừa khít bộ nhớ":
 
-### Vì sao cần Big Data?
+| Chiều | Thực tế |
+|-------|---------|
+| **Volume** | ~2,5 GB raw, **58,4 triệu dòng** trên các bảng trung gian trước khi hợp nhất |
+| **Variety** | 7 bảng quan hệ ở **3 cấp độ tổng hợp** khác nhau (theo khách hàng / theo khoản vay / theo tháng) |
+| **Velocity** | Hồ sơ vay đến liên tục → cần đường streaming song hành với batch |
+| **Veracity** | Dữ liệu không tĩnh — tỷ lệ vỡ nợ trên các bộ dữ liệu tín dụng công khai trôi từ ~15% (2015) lên >23% (2024) [arXiv:2511.03807] |
 
-Đây không phải là một bài toán Pandas-fit-in-memory:
-
-| Yếu tố | Số liệu thực tế |
-|--------|----------------|
-| **Volume** | ~2.5 GB raw, **58.4 triệu hàng** ở các bảng trung gian trước khi gộp |
-| **Variety** | 7 bảng quan hệ, **3 mức hạt khác nhau** (theo khách hàng / theo khoản vay / theo tháng) |
-| **Velocity** | Đơn vay phát sinh liên tục → cần đường streaming song song với batch |
-| **Veracity** | Dữ liệu phi dừng — tỉ lệ vỡ nợ trên các bộ dữ liệu tín dụng công khai biến động từ ~15% (2015) lên >23% (2024) [arXiv:2511.03807] |
-
-Cụ thể:
-- **58.4M hàng** không nằm gọn trong bộ nhớ đơn nút (4–8 GB).
-- **Phép join 7 bảng ở 3 mức hạt khác nhau** đòi hỏi shuffle phân tán.
-- **Spark cung cấp một runtime duy nhất** cho cả batch (huấn luyện) lẫn streaming (suy luận), tránh lệch giữa môi trường training và serving.
+Cụ thể: 58,4 triệu dòng không vừa heap 4–8 GB của một nút đơn; join 7 bảng ở 3 cấp độ tổng hợp đòi hỏi shuffle phân tán; và Spark cung cấp **một runtime duy nhất cho cả huấn luyện batch lẫn suy luận streaming**, giảm rủi ro sai lệch huấn luyện–triển khai (training–serving divergence).
 
 ---
 
-## 2. Bộ dữ liệu Home Credit
+## 2. Dữ liệu
 
-### Nguồn
+Nguồn: [Home Credit Default Risk](https://www.kaggle.com/c/home-credit-default-risk) (Kaggle, 2018), do Home Credit Group công bố — công ty tài chính tiêu dùng hoạt động tại các thị trường mới nổi, trong đó có Việt Nam.
 
-[Home Credit Default Risk](https://www.kaggle.com/c/home-credit-default-risk) — cuộc thi Kaggle do **Home Credit Group** (tập đoàn tài chính tiêu dùng hoạt động tại nhiều thị trường mới nổi, trong đó có Việt Nam) tổ chức năm 2018.
+Bảng chính là `application_train` (mỗi dòng một hồ sơ vay). Sáu bảng phụ chứa lịch sử tín dụng ở các cấp độ tổng hợp khác nhau, liên kết qua `SK_ID_CURR` (khách hàng) hoặc `SK_ID_PREV` (khoản vay trước).
 
-### 7 bảng dữ liệu
+| Bảng | Số dòng | Số cột | Cấp độ | Nội dung |
+|------|--------:|-------:|--------|----------|
+| `application_train.csv` | 307.511 | 122 | khách hàng | Hồ sơ hiện tại — nhân khẩu học, tài chính, điểm bên ngoài (EXT_SOURCE_1/2/3), **nhãn TARGET** |
+| `bureau.csv` | 1.716.428 | 17 | khoản vay ngoài | Lịch sử tín dụng tại tổ chức khác (qua Credit Bureau) |
+| `bureau_balance.csv` | 27.299.925 | 3 | tháng × khoản vay bureau | Trạng thái hàng tháng (nhóm DPD) của từng khoản vay bureau |
+| `previous_application.csv` | 1.670.214 | 37 | khoản vay HC trước | Hồ sơ trước đó: Approved / Refused / Canceled |
+| `installments_payments.csv` | 13.605.401 | 8 | kỳ trả góp | Lịch sử trả nợ: ngày/số tiền đến hạn so với thực trả |
+| `credit_card_balance.csv` | 3.840.312 | 23 | tháng × thẻ | Dư nợ thẻ tín dụng, hạn mức, DPD |
+| `POS_CASH_balance.csv` | 10.001.358 | 8 | tháng × khoản POS | Lịch sử khoản vay tại điểm bán |
+| **Tổng** | **~58,4M** | — | | |
 
-Bảng chính là `application_train` — mỗi dòng là một đơn vay. Sáu bảng còn lại chứa **lịch sử tín dụng** ở các mức hạt khác nhau và liên kết qua khóa `SK_ID_CURR` (khách hàng) hoặc `SK_ID_PREV` (khoản vay trước).
+**Nhãn:** `TARGET ∈ {0, 1}` — bằng 1 nếu khách hàng gặp khó khăn thanh toán ở các kỳ trả góp đầu.
+Cân bằng lớp: 282.686 không vỡ nợ (91,9%) so với 24.825 vỡ nợ (8,1%) ⇒ bắt buộc dùng class weighting (`weightCol`) để tránh mô hình tầm thường dự đoán toàn 0.
 
-| Bảng | Số hàng | Số cột | Mức hạt | Ý nghĩa |
-|------|--------:|-------:|---------|---------|
-| `application_train.csv` | 307,511 | 122 | 1 dòng / khách hàng | Đơn vay hiện tại — thông tin nhân khẩu, tài chính, tài sản, nguồn ngoài (EXT_SOURCE_1/2/3), **biến mục tiêu TARGET** |
-| `bureau.csv` | 1,716,428 | 17 | 1 dòng / khoản vay từ bureau ngoài | Lịch sử tín dụng từ các tổ chức tín dụng khác (qua Credit Bureau) |
-| `bureau_balance.csv` | 27,299,925 | 3 | 1 dòng / tháng / khoản vay bureau | Trạng thái tháng-tháng của mỗi khoản vay bureau (DPD bucket) |
-| `previous_application.csv` | 1,670,214 | 37 | 1 dòng / khoản vay trước với Home Credit | Lịch sử đơn vay trước đó: Approved / Refused / Canceled |
-| `installments_payments.csv` | 13,605,401 | 8 | 1 dòng / lần trả góp | Lịch sử trả nợ: ngày dự kiến, ngày thực tế, số tiền |
-| `credit_card_balance.csv` | 3,840,312 | 23 | 1 dòng / tháng / thẻ tín dụng | Lịch sử thẻ tín dụng: dư nợ, hạn mức, DPD |
-| `POS_CASH_balance.csv` | 10,001,358 | 8 | 1 dòng / tháng / khoản POS | Lịch sử khoản vay POS (point-of-sale loan) |
-| **Tổng** | **~58.4 triệu** | — | | |
+**Các đặc trưng dự báo mạnh nhất** (xếp hạng Kruskal–Wallis, §10):
 
-### Biến mục tiêu
+| Đặc trưng | Thống kê H | Diễn giải |
+|-----------|-----------:|-----------|
+| `EXT_SOURCE_3` | 4.672,97 | Điểm tín dụng bên ngoài thứ ba |
+| `EXT_SOURCE_2` | 4.649,61 | Điểm tín dụng bên ngoài thứ hai |
+| `DAYS_BIRTH` | 1.371,48 | Tuổi (số ngày âm) |
+| `DAYS_EMPLOYED` | 144,83 | Số ngày đi làm |
+| `AMT_INCOME_TOTAL` | 72,98 | Thu nhập |
+| `AMT_CREDIT` | 70,51 | Số tiền vay đề nghị |
 
-`TARGET ∈ {0, 1}` — 1 nếu khách hàng gặp khó khăn trả nợ (vỡ nợ kỹ thuật) trên ít nhất một trong các đợt trả đầu tiên.
-
-**Phân phối (mất cân bằng):**
-- `TARGET = 0` (không vỡ nợ): **282,686** khách (91.9%)
-- `TARGET = 1` (vỡ nợ): **24,825** khách (8.1%)
-
-⇒ Cần **cân trọng số lớp** (`classWeightCol`) khi huấn luyện để tránh mô hình "luôn dự đoán 0".
-
-### Đặc trưng quan trọng nhất
-
-Qua xếp hạng **Kruskal–Wallis** (chi tiết ở §10):
-
-| Đặc trưng | H statistic | Diễn giải |
-|-----------|------------:|-----------|
-| `EXT_SOURCE_3` | 4,672.97 | Điểm bureau ngoài thứ 3 (Home Credit không công khai phương pháp tính) |
-| `EXT_SOURCE_2` | 4,649.61 | Điểm bureau ngoài thứ 2 |
-| `DAYS_BIRTH` | 1,371.48 | Tuổi khách (âm, tính bằng ngày so với ngày vay) |
-| `DAYS_EMPLOYED` | 144.83 | Số ngày làm việc |
-| `AMT_INCOME_TOTAL` | 72.98 | Thu nhập |
-| `AMT_CREDIT` | 70.51 | Khoản tín dụng đề nghị |
-
-Hai điểm `EXT_SOURCE` là chỉ báo mạnh nhất — phù hợp với hiểu biết nghiệp vụ: lịch sử tín dụng từ các bureau bên thứ ba thường là tín hiệu mạnh hơn các đặc trưng nhân khẩu học.
+Hai điểm `EXT_SOURCE` áp đảo — nhất quán với trực giác nghiệp vụ rằng lịch sử bureau bên thứ ba dự báo tốt hơn nhân khẩu học thô.
 
 ---
 
 ## 3. Kiến trúc hệ thống
 
-Hai đường xử lý song song, **chia sẻ chung lõi nghiệp vụ** (`credit_risk/inference/realtime.py`) để bảo đảm không lệch giữa huấn luyện và suy luận:
+Hai đường xử lý song song, áp dụng **cùng một bộ quy tắc nghiệp vụ** (ngưỡng phân tầng rủi ro, luật quyết định, EL = PD × LGD × EAD):
 
 ```
 ═══════════════════════════════════════════════════════════════════
-                    BATCH PIPELINE (huấn luyện + phân tích)
+                    PIPELINE BATCH (huấn luyện + phân tích)
 ═══════════════════════════════════════════════════════════════════
 
   HDFS (raw)              Spark Batch                    MLflow Tracking
   ┌─────────┐         ┌──────────────────┐              ┌────────────┐
-  │ 7 CSV   │────────►│ ETL: join 7 bảng │              │ Params     │
+  │ 7 CSVs  │────────►│ ETL: join bảng   │              │ Params     │
   │ ~2.5 GB │         │ → master parquet │              │ Metrics    │
   └─────────┘         │ → feature pipe   │─────────────►│ Artifacts  │
                       │ → GBT training   │              │ Registry   │
@@ -117,10 +102,10 @@ Hai đường xử lý song song, **chia sẻ chung lõi nghiệp vụ** (`credi
                                │
                                ▼
                       ┌──────────────────┐              ┌────────────┐
-                      │ Risk analysis    │─────────────►│ JSON       │
-                      │ - Tier (4)       │              │ reports    │
-                      │ - EL/UL/Capital  │              │            │
-                      │ - Stress test    │              └────────────┘
+                      │ Risk analytics   │─────────────►│ JSON       │
+                      │ - 4-tier segm.   │              │ reports    │
+                      │ - EL/UL/Capital  │              └────────────┘
+                      │ - Stress testing │
                       │ Monitoring       │
                       │ - PSI + KS       │
                       │ - Jensen-Shannon │
@@ -129,23 +114,22 @@ Hai đường xử lý song song, **chia sẻ chung lõi nghiệp vụ** (`credi
                       └──────────────────┘
 
 ═══════════════════════════════════════════════════════════════════
-                    STREAMING PIPELINE (suy luận real-time)
+                    PIPELINE STREAMING (suy luận thời gian thực)
 ═══════════════════════════════════════════════════════════════════
 
   Kafka Producer          Kafka                Spark Structured Streaming
   ┌─────────────┐    ┌──────────────┐         ┌──────────────────────┐
-  │ Loan apps   │───►│ Topic:       │────────►│ readStream.kafka     │
+  │ Hồ sơ vay   │───►│ Topic:       │────────►│ readStream.kafka     │
   │ (JSON)      │    │ loan-        │         │ from_json + schema   │
-  │ acks=all    │    │ applications │         │                      │
-  │ gzip        │    │              │         │ ── shared core ──    │
-  └─────────────┘    └──────────────┘         │ assign_tier()        │
-                                              │ make_decision()      │
-                                              │ expected_loss()      │
-                                              │                      │
-                                              │ Window 1 min:        │
-                                              │ - count, PD avg      │
+  │ acks=all    │    │ applications │         │ scoring logic:       │
+  │ gzip        │    │              │         │ - PD (demo scorer)   │
+  └─────────────┘    └──────────────┘         │ - risk tier          │
+                                              │ - decision           │
+                                              │ - expected loss      │
+                                              │ Cửa sổ 1 phút:       │
+                                              │ - count, avg PD      │
                                               │ - approve/reject     │
-                                              │ - total EL           │
+                                              │ - tổng EL            │
                                               └──────────┬───────────┘
                                                          │
                                               ┌──────────┼──────────┐
@@ -157,156 +141,127 @@ Hai đường xử lý song song, **chia sẻ chung lõi nghiệp vụ** (`credi
                                          └─────────┘ └──────┘ └─────────┘
 ```
 
-### Lõi nghiệp vụ dùng chung
-
-Module `credit_risk/inference/realtime.py` cung cấp:
-
-- `assign_tier(pd_score)` → phân tầng rủi ro {Low / Medium / High / Very High}
-- `make_decision(pd_score, threshold)` → APPROVE / REVIEW / REJECT
-- `expected_loss(pd, lgd, ead)` → EL = PD × LGD × EAD
-
-Cả pipeline batch và streaming **import cùng module này**, không sao chép code. Đây là một thiết kế có chủ đích để **tránh training–serving skew** ngay từ kiến trúc.
+**Quy tắc nghiệp vụ dùng chung.** Cả hai đường dùng cùng ngưỡng cho: phân tầng rủi ro (Low / Medium / High / Very High), quyết định phê duyệt (APPROVE / REVIEW / REJECT), và tổn thất kỳ vọng (LGD = 0,45 theo Basel II Foundation IRB). Các quy tắc hiện được cài đặt trong `credit_risk/risk/` (batch) và inline trong `streaming/spark_streaming.py` (streaming); việc trích xuất thành module dùng chung `credit_risk/inference/` nằm trong lộ trình (§13).
 
 ---
 
-## 4. Stack công nghệ
+## 4. Tech stack
 
 | Tầng | Công nghệ | Lý do lựa chọn |
 |------|-----------|----------------|
-| **Lưu trữ phân tán** | HDFS 3.3.6 | Sao chép cấp khối (RF=3), Spark đọc song song theo định vị khối, hỗ trợ Parquet partitioning |
-| **Quản lý tài nguyên** | YARN | Bộ lập lịch chuẩn của Hadoop ecosystem |
-| **Tính toán theo lô** | Apache Spark 3.5 + PySpark | Vector hóa, join đa bảng native, một API duy nhất cho ETL + ML + streaming |
-| **Học máy** | Spark MLlib (GBTClassifier) | Huấn luyện phân tán ngay trong Spark, không phải xuất dữ liệu ra ngoài |
-| **Theo dõi thí nghiệm** | MLflow 2.9 + backend SQLite | Lưu params/metrics/artifacts, model registry, gọn nhẹ phù hợp môi trường khóa luận |
-| **Hàng đợi tin nhắn** | Apache Kafka 3.5 | Hàng đợi sự kiện có thể phát lại, chuẩn cho suy luận theo sự kiện |
-| **Xử lý streaming** | Spark Structured Streaming | Dùng lại code path của Spark, checkpoint đảm bảo exactly-once |
-| **Điều phối** | Make + Docker Compose | Môi trường dev tái lập được; production thực sẽ dùng Airflow / Argo |
-| **Ngôn ngữ** | Python 3.12 | Hỗ trợ đầy đủ PySpark, scipy, mlflow |
+| Lưu trữ phân tán | HDFS 3.3.6 | Sao chép theo block, đọc song song data-local, phân vùng Parquet |
+| Quản lý tài nguyên | YARN | Bộ lập lịch chuẩn của hệ sinh thái Hadoop |
+| Tính toán batch | Apache Spark 3.5 + PySpark | Join đa bảng native, một API cho ETL + ML + streaming |
+| Học máy | Spark MLlib (GBTClassifier) | Huấn luyện phân tán ngay trong Spark — không cần xuất dữ liệu |
+| Theo dõi thí nghiệm | MLflow 2.9 (backend SQLite) | Params/metrics/artifacts + model registry, gọn nhẹ cho đồ án |
+| Hàng đợi thông điệp | Apache Kafka 3.5 | Event log phát lại được, chuẩn cho suy luận hướng sự kiện |
+| Xử lý luồng | Spark Structured Streaming | Tái dùng code path của Spark; checkpoint offset cho at-least-once (§9.1) |
+| Điều phối | Make + Docker Compose | Môi trường dev tái lập được (production sẽ dùng Airflow / Argo) |
+| Ngôn ngữ | Python 3.12 | Hỗ trợ đầy đủ PySpark, scipy, mlflow |
 
-### Tối ưu Spark đã áp dụng
+**Tối ưu Spark đã bật:** Adaptive Query Execution, tuần tự hóa Kryo, chuyển đổi Spark↔pandas tăng tốc bằng PyArrow (dùng trong Kruskal–Wallis), Parquet nén Snappy. AQE và Kryo được bật trong cấu hình nhưng **chưa đo lường định lượng** trên bộ dữ liệu này (§13).
 
-| Tối ưu | Tác dụng | Trạng thái đo lường |
-|--------|----------|---------------------|
-| **Adaptive Query Execution (AQE)** | Tự gộp phân vùng shuffle, xử lý skew tự động | Bật mặc định; **chưa benchmark định lượng** |
-| **Kryo serializer** | Serialize nhanh hơn Java mặc định | Đã cấu hình; **chưa benchmark định lượng** |
-| **PyArrow integration** | Tăng tốc Spark ↔ Pandas khi materialise | Dùng trong tính Kruskal–Wallis |
-| **Snappy compression** | Giảm I/O đĩa và HDFS, vẫn splittable | Mặc định cho Parquet output |
-
-> ⚠️ **Trung thực:** AQE và Kryo được bật ở cấu hình, nhưng **chưa có benchmark trước/sau** để chứng minh độ tăng tốc cụ thể trên dataset này. Đây là một hạn chế đã ghi nhận (§13).
-
-### Hiệu chỉnh bộ nhớ cho VM 3.8 GB
-
-```python
-.config("spark.driver.memory", "2g")
-.config("spark.executor.memory", "1g")
-```
-
-Cấp phát thêm **2 GB swap** trên VM để hệ điều hành không OOM-kill Spark khi join nặng nhất. Đây là cách thích nghi với môi trường thi cử có giới hạn tài nguyên, **không phải khuyến nghị production**.
+**Điều chỉnh bộ nhớ cho VM 3,8 GB:** `spark.driver.memory=2g`, `spark.executor.memory=1g`, cộng 2 GB swap để hệ điều hành không OOM-kill Spark trong các join nặng nhất. Đây là thích ứng với phần cứng thi cử hạn chế, không phải khuyến nghị production.
 
 ---
 
 ## 5. Cấu trúc dự án
 
-Áp dụng theo phong cách **8-layer data catalog của Kedro** cho thư mục `data/`, kết hợp với package Python chuẩn:
+Thư mục `data/` theo **mô hình catalog 8 tầng kiểu Kedro**; mã nguồn là Python package cài được chuẩn.
 
 ```
 Big_Data_Final_Exam/
 ├── credit_risk/                    # Package chính (importable)
-│   ├── config/                     # Config loader (base.yaml + env override)
+│   ├── config/                     # Config loader (conf/base/config.yaml)
 │   ├── data/
-│   │   └── ingestion/              # Multi-table ETL — join 7 bảng
-│   ├── features/                   # Feature engineering (domain + Spark ML pipe)
+│   │   └── ingestion/
+│   │       └── multi_table.py      # ETL đa bảng — aggregate + join các bảng con
+│   ├── features/
+│   │   ├── pipeline.py             # Spark ML pipeline (Imputer → OHE → Scaler → Assembler)
+│   │   └── kruskal_selection.py    # Xếp hạng đặc trưng Kruskal–Wallis
 │   ├── models/
 │   │   ├── trainer.py              # GBT trainer với class weighting
-│   │   └── registry.py             # MLflow registration
+│   │   ├── registry.py             # Đăng ký MLflow
+│   │   └── explainer.py            # Feature attribution (Saabas) — chưa nối vào pipeline
 │   ├── risk/
-│   │   ├── segmentation.py         # Phân tầng 4 tier
+│   │   ├── segmentation.py         # Phân tầng rủi ro 4 tier
 │   │   ├── expected_loss.py        # EL = PD × LGD × EAD
-│   │   ├── basel_capital.py        # UL, vốn kinh tế
-│   │   └── stress_test.py          # 4 kịch bản vĩ mô
+│   │   ├── stress_testing.py       # 4 kịch bản vĩ mô
+│   │   └── scorecard.py            # WoE / IV (Siddiqi) — chưa nối vào pipeline
 │   ├── monitoring/
-│   │   ├── psi.py                  # Population Stability Index
-│   │   ├── ks_test.py              # Kolmogorov–Smirnov
-│   │   ├── jensen_shannon.py       # JS divergence cho hạng mục
-│   │   └── retraining_policy.py    # Quyết định tái huấn luyện theo drift
-│   ├── feature_selection/
-│   │   └── kruskal_wallis.py       # Xếp hạng phi tham số
-│   ├── inference/
-│   │   └── realtime.py             # ⭐ LÕI dùng chung batch + streaming
+│   │   ├── drift.py                # PSI + KS cho đặc trưng số
+│   │   ├── categorical_drift.py    # JS divergence + phát hiện hạng mục mới
+│   │   └── retraining_trigger.py   # Quyết định tái huấn luyện theo drift
 │   └── utils/
-│       ├── spark_session.py        # Builder với HDFS + Kryo + AQE
+│       ├── spark.py                # SparkSession builder (HDFS + Kryo + AQE)
 │       └── logging.py              # Structured logging
 │
-├── streaming/                      # Kafka + Spark Streaming
-│   ├── kafka_producer.py           # Phát đơn vay JSON (random hoặc replay)
+├── streaming/                      # Kafka + Spark Structured Streaming
+│   ├── kafka_producer.py           # Phát hồ sơ vay JSON (random hoặc replay CSV)
 │   ├── spark_streaming.py          # Scorer + windowed aggregation
-│   └── kafka_consumer.py           # Đọc scoring-results topic
+│   └── kafka_consumer.py           # Đọc topic scoring-results
 │
-├── pipelines/                      # Pipeline orchestrators (batch)
+├── pipelines/                      # Orchestrator các pipeline batch
 │   ├── etl_pipeline.py             # Load → join → split → parquet
 │   ├── training_pipeline.py        # Feature pipe → GBT → MLflow
-│   ├── risk_pipeline.py            # Tier + EL + Basel capital + stress
+│   ├── evaluation_pipeline.py      # So sánh các phiên bản model đã đăng ký
+│   ├── ablation_pipeline.py        # Ablation: chỉ application_train vs đủ bảng
+│   ├── risk_pipeline.py            # Tier + EL + vốn Basel + stress
 │   ├── monitoring_pipeline.py      # PSI + KS trên đặc trưng số
-│   ├── feature_selection_pipeline.py     # Kruskal–Wallis ranking
-│   └── categorical_drift_pipeline.py     # JS divergence + new-category detection
+│   ├── feature_selection_pipeline.py     # Xếp hạng Kruskal–Wallis
+│   ├── categorical_drift_pipeline.py     # JS divergence + hạng mục mới
+│   ├── hdfs_pipeline.py            # Demo tích hợp HDFS → Spark → HDFS
+│   └── yarn_submit.sh              # Submit lên YARN
 │
 ├── infrastructure/
-│   ├── docker-compose.yml          # Kafka + Zookeeper + Kafka UI + MLflow
-│   └── hadoop/                     # HDFS pseudo-distributed config
+│   └── docker-compose.yml          # Kafka + Zookeeper + Kafka UI + Spark + MLflow
 │
 ├── notebooks/
-│   └── EDA_Home_Credit_Default_Risk.ipynb   # EDA 13 cell trên Colab (8 GB driver)
+│   └── EDA_Home_Credit_Default_Risk.ipynb   # EDA 13 cell (Colab, driver 8 GB)
 │
 ├── conf/base/
-│   └── config.yaml                 # ⭐ Toàn bộ hyperparams + ngưỡng + HDFS paths
+│   └── config.yaml                 # ⭐ Toàn bộ hyperparams + ngưỡng + đường dẫn HDFS
 │
-├── data/                           # 8-layer data catalog
+├── data/                           # Catalog dữ liệu 8 tầng
 │   ├── 01_raw/                     # CSV gốc từ Kaggle
-│   ├── 02_intermediate/            # (HDFS) parquet sau khi cleaned
-│   ├── 03_primary/                 # (HDFS) master sau join
-│   ├── 04_feature/                 # (HDFS) features sau Spark ML pipe
-│   ├── 05_model_input/             # Train/val/test split
-│   ├── 06_models/                  # MLflow artifacts (gắn registry)
-│   ├── 07_model_output/            # PD scores, predictions
-│   └── 08_reporting/               # ⭐ Báo cáo JSON cuối cùng:
-│                                   #   - portfolio_risk_report.json
-│                                   #   - stress_test_report.json
-│                                   #   - drift_report.json
-│                                   #   - retraining_decision.json
+│   ├── 02_intermediate/            # (HDFS) parquet sau chuẩn hóa kiểu
+│   ├── 03_primary/                 # (HDFS) master dataset sau join
+│   ├── 04_feature/                 # (HDFS) đặc trưng sau pipeline
+│   ├── 05_model_input/             # Split train/val/test
+│   ├── 06_models/                  # Artifacts MLflow (gắn registry)
+│   ├── 07_model_output/            # Điểm PD danh mục
+│   └── 08_reporting/               # ⭐ Báo cáo JSON cuối (commit vào repo):
+│                                   #   portfolio_risk_report.json
+│                                   #   stress_test_report.json
+│                                   #   drift_report.json
+│                                   #   retraining_decision.json
 │
-├── docs/                           # Kiến trúc, ADR, ghi chú demo
-├── tests/                          # Unit + integration tests
+├── documents/
+│   ├── Reports_BigDataFinalExam.pdf     # Báo cáo kỹ thuật
+│   └── Slide_BigDataFinalExam.pdf       # Slide thuyết trình
 │
+├── tests/                          # Unit tests (module drift)
 ├── pyproject.toml                  # Dependencies (PEP 621)
 ├── Makefile                        # Entry points (make etl / train / risk / ...)
-├── BigData_Technical_Report.docx   # Báo cáo kỹ thuật ~21 trang
-└── README.md                       # File bạn đang đọc
+└── README.md
 ```
 
-### Quy ước data catalog
-
-| Tầng | Nội dung | Lưu ở |
-|------|----------|-------|
-| `01_raw` | CSV gốc, **không bao giờ sửa** | Local (sau đó upload HDFS) |
-| `02_intermediate` | Parquet đã chuẩn hóa dtype, NA chuẩn | HDFS |
-| `03_primary` | Master dataset sau join 7 bảng | HDFS |
+| Tầng | Nội dung | Nơi lưu |
+|------|----------|---------|
+| `01_raw` | CSV gốc, **không bao giờ sửa** | Local → upload HDFS |
+| `02_intermediate` | Parquet chuẩn hóa kiểu | HDFS |
+| `03_primary` | Master dataset sau join | HDFS |
 | `04_feature` | Sau Imputer + OHE + Scaler + VectorAssembler | HDFS |
-| `05_model_input` | 3 split train/val/test với hash deterministic | HDFS |
-| `06_models` | MLflow run artifacts (logged via tracking URI) | SQLite + filesystem |
-| `07_model_output` | PD score cho toàn danh mục | HDFS |
-| `08_reporting` | JSON báo cáo cho human review | Local repo (commit) |
-
-> ℹ️ Trên môi trường Windows hiện tại, `data/02_intermediate` và `data/04_feature` chỉ chứa `.gitkeep` vì các tầng này được vật chất hóa trên HDFS chứ không phải local FS.
+| `05_model_input` | Split train/val/test tất định | HDFS |
+| `06_models` | Artifacts run MLflow | SQLite + filesystem |
+| `07_model_output` | Điểm PD danh mục | HDFS |
+| `08_reporting` | Báo cáo JSON đọc được | Repo (commit) |
 
 ---
 
-## 6. Quy trình ETL đa bảng
+## 6. ETL đa bảng
 
-### Chiến lược
-
-Bảng chính `application_train` là **bảng grain khách hàng** (1 dòng/khách). Sáu bảng còn lại ở grain khác cần **aggregate về 1 dòng/khách** trước khi join.
-
-### Mẫu gộp (PySpark)
+`application_train` là bảng neo cấp khách hàng (1 dòng/khách). Các bảng con phải được **gộp về cấp khách hàng** trước khi join:
 
 ```python
 df_child.groupBy("SK_ID_CURR") \
@@ -318,188 +273,141 @@ df_child.groupBy("SK_ID_CURR") \
     )
 ```
 
-### Chiến lược aggregate cho từng bảng
+| Bảng con | Số dòng | Chiến lược tổng hợp | Đặc trưng |
+|----------|--------:|---------------------|----------:|
+| `bureau` | 1,7M | count, còn hoạt động vs đã đóng, trung bình quá hạn, tổng dư nợ | **4** |
+| `previous_application` | 1,7M | count, được duyệt vs từ chối, trung bình số tiền/kỳ hạn | **8** |
+| `installments_payments` | 13,6M | trung bình/max DPD, đếm lần trễ, đếm lần trả thiếu | **6** |
+| `credit_card_balance` | 3,8M | trung bình dư nợ, trung bình hệ số sử dụng, tổng DPD | **6** |
+| `pos_cash_balance` | 10,0M | count, max DPD, đếm tháng trễ | **5** |
 
-| Bảng con | Hàng gốc | Aggregate strategy | Đặc trưng tạo ra |
-|----------|---------:|--------------------|------------------:|
-| `bureau` | 1.7M | count, count active vs closed, mean overdue, sum debt | **4** |
-| `previous_application` | 1.7M | count, count approved vs refused, mean amount/term | **8** |
-| `installments_payments` | 13.6M | mean/max DPD, count late, count underpay | **6** |
-| `credit_card_balance` | 3.8M | mean balance, mean utilisation, sum DPD | **6** |
-| `pos_cash_balance` | 10.0M | count, max DPD, late-month count | **5** |
+Tất cả phép nối đều là **LEFT JOIN theo `SK_ID_CURR`** — giữ lại khách hàng chưa có lịch sử (NULL được xử lý ở tầng Imputer).
 
-### Join
+**Đã xác minh trên HDFS:** đầu vào 7 CSV (~58,4M dòng) → `application_train` 307.511 × 122 → sau gộp bureau 307.511 × 126 → sau toàn bộ join + đặc trưng nghiệp vụ **307.511 × ~200 cột**.
 
-Tất cả là **LEFT JOIN trên `SK_ID_CURR`** — giữ lại các khách hàng không có lịch sử (sẽ là NULL, được xử lý ở bước Imputer).
-
-**Kết quả đã xác minh trên HDFS:**
-
-| Bước | Kết quả |
-|------|---------|
-| Input | 7 CSV, ~58.4M hàng tổng |
-| `application_train` ban đầu | 307,511 × 122 |
-| Sau join `bureau` aggregation | **307,511 × 126** (+4 đặc trưng) |
-| Sau toàn bộ join + domain features | **307,511 × ~200** cột |
+> Lưu ý: `bureau_balance` (27,3M dòng) được khai báo trong `config.yaml` nhưng **chưa có aggregator** — trạng thái tháng của nó chưa đóng góp đặc trưng vào master dataset. Con số 58,4M phản ánh khối lượng raw lưu trữ và đọc, không phải khối lượng đã chuyển thành đặc trưng. Bổ sung aggregator theo nhóm DPD nằm trong lộ trình (§13).
 
 ---
 
-## 7. Kỹ thuật đặc trưng và huấn luyện
+## 7. Xây dựng đặc trưng & Huấn luyện
 
-### 7.1 Domain features (6 đặc trưng nghiệp vụ)
+### 7.1 Đặc trưng nghiệp vụ
 
-| Feature | Công thức | Ý nghĩa |
-|---------|-----------|---------|
-| `FEAT_DEBT_INCOME_RATIO` | AMT_CREDIT / AMT_INCOME_TOTAL | Tỉ lệ nợ trên thu nhập |
+| Đặc trưng | Công thức | Ý nghĩa |
+|-----------|-----------|---------|
+| `FEAT_DEBT_INCOME_RATIO` | AMT_CREDIT / AMT_INCOME_TOTAL | Tỷ lệ nợ trên thu nhập |
 | `FEAT_ANNUITY_INCOME_RATIO` | (AMT_ANNUITY × 12) / AMT_INCOME_TOTAL | Gánh nặng trả nợ hàng năm |
-| `FEAT_CREDIT_GOODS_RATIO` | AMT_CREDIT / AMT_GOODS_PRICE | Đòn bẩy so với tài sản |
-| `FEAT_CREDIT_TERM` | AMT_CREDIT / AMT_ANNUITY | Kỳ hạn vay suy ra |
-| `FEAT_EMPLOYMENT_RATIO` | DAYS_EMPLOYED / DAYS_BIRTH | Tỉ lệ thời gian có việc làm trên tuổi đời |
-| `FEAT_EXT_SOURCE_MEAN` | mean(EXT_SOURCE_1, 2, 3) | Điểm bureau ngoài trung bình |
+| `FEAT_CREDIT_GOODS_RATIO` | AMT_CREDIT / AMT_GOODS_PRICE | Đòn bẩy so với giá trị tài sản |
+| `FEAT_CREDIT_TERM` | AMT_CREDIT / AMT_ANNUITY | Kỳ hạn vay ngầm định |
+| `FEAT_EMPLOYMENT_RATIO` | DAYS_EMPLOYED / DAYS_BIRTH | Tỷ trọng thời gian đi làm trên tuổi đời |
+| `FEAT_EXT_SOURCE_MEAN` | mean(EXT_SOURCE_1, 2, 3) | Điểm bên ngoài trung bình |
 
-### 7.2 Spark ML Pipeline
+### 7.2 Spark ML pipeline
 
 ```
-Imputer (median số, mode hạng mục)
-  ↓
-StringIndexer (cho cột hạng mục)
-  ↓
-OneHotEncoder
-  ↓
-VectorAssembler
-  ↓
-StandardScaler
+Imputer (median cho số, mode cho hạng mục)
+  → StringIndexer → OneHotEncoder → VectorAssembler → StandardScaler
 ```
 
-Pipeline **fit trên tập huấn luyện** và áp dụng nguyên xi cho validation, test, **và dữ liệu streaming** → đảm bảo nhất quán huấn luyện – suy luận.
+Pipeline được **fit chỉ trên tập huấn luyện** và áp dụng nguyên xi cho validation và test, đảm bảo nhất quán giữa huấn luyện và đánh giá. (Đường streaming hiện chưa đi qua pipeline này — xem §9.)
 
-### 7.3 Huấn luyện GBT
+### 7.3 Vì sao chọn Spark MLlib GBT
 
-**Lý do chọn GBT (Gradient Boosted Trees) trong Spark MLlib:**
-- ✅ Có sẵn trong MLlib → không phải xuất dữ liệu ra ngoài Spark
-- ✅ Huấn luyện phân tán trên nhiều executor
-- ✅ Bắt được các tương tác phi tuyến trong đặc trưng tín dụng
-- ✅ Hỗ trợ cân trọng số lớp (`weightCol`)
+Huấn luyện phân tán ngay trong runtime Spark (không xuất dữ liệu), bắt được tương tác phi tuyến giữa đặc trưng, hỗ trợ class weighting qua `weightCol`. Khoảng cách ~1–2 điểm phần trăm ROC-AUC so với LightGBM/XGBoost trên benchmark Kaggle là **đánh đổi có chủ đích** để giữ toàn bộ pipeline trong một runtime (§13).
 
-### 7.4 Kết quả (verified từ MLflow)
+### 7.4 Kết quả (xác minh trong MLflow)
 
-**Một lần chạy duy nhất** trên thí nghiệm `credit_risk_platform / gbt_baseline`:
+Một lần chạy, experiment `credit_risk_platform / gbt_baseline`:
 
 | Chỉ số | Giá trị | Ý nghĩa nghiệp vụ |
 |--------|--------:|-------------------|
-| **ROC-AUC** | **0.7663** | Phân tách mạnh giữa nhóm vỡ nợ và không vỡ nợ |
-| PR-AUC | 0.2461 | Phù hợp với base rate 8% — cao hơn random 0.08 đáng kể |
-| **KS** | **0.4016** | Vượt ngưỡng **0.30** — chuẩn industry cho scorecard production |
-| Accuracy | 0.9178 | Lệch do imbalance — không phải metric chính |
-| F1 (weighted) | 0.8830 | — |
-| Precision | 0.8839 | — |
-| Recall | 0.9178 | — |
-| **PD trung bình** | **8.29%** | ≈ tỉ lệ vỡ nợ thực tế **8.2%** — **hiệu chỉnh tốt** (calibration gap < 0.1pp) |
+| **ROC-AUC** | **0,7663** | Phân biệt tốt nhóm vỡ nợ và không vỡ nợ |
+| PR-AUC | 0,2461 | Vượt xa baseline ngẫu nhiên 0,08 ở tỷ lệ nền 8% |
+| **KS** | **0,4016** | Vượt ngưỡng **0,30** của ngành cho scorecard production |
+| Accuracy | 0,9178 | Bị thổi phồng do mất cân bằng lớp — không phải chỉ số chính |
+| Weighted F1 | 0,8830 | — |
+| **Mean PD** | **8,29%** | ≈ tỷ lệ vỡ nợ thực tế 8,2% — **cân chỉnh tốt** (lệch < 0,1 điểm phần trăm) |
 
-> ℹ️ **Trung thực:** Đây là **kết quả của một lần chạy**, **chưa có cross-validation** để đo phương sai. Cũng **không có ablation study** so sánh "chỉ application_train" vs "đầy đủ 7 bảng" — đây là hạn chế đã ghi nhận (§13).
+Đây là ước lượng điểm từ một lần huấn luyện; chưa báo cáo phương sai cross-validation (§13).
 
 ---
 
 ## 8. Phân tích rủi ro Basel II
 
-### 8.1 Tổng quan danh mục (45,859 khách hàng đã chấm điểm)
-
-Sau khi áp dụng mô hình lên tập test và áp dụng module `risk/`:
+### 8.1 Tổng quan danh mục (45.859 khách hàng được chấm điểm)
 
 | Chỉ số | Giá trị |
 |--------|--------:|
-| Tổng khách hàng chấm điểm | **45,859** |
-| Tổng EAD (Exposure at Default) | 27,407.37 M |
-| Tổng EL (Expected Loss) | **950.72 M** |
-| Tỉ lệ EL trên danh mục | 3.47% (trung bình) |
-| PD trung bình | 8.29% |
-| LGD (Basel II FIRB cố định) | 45.0% |
-| Tỉ lệ vỡ nợ thực tế | 8.2% |
+| Khách hàng được chấm | **45.859** |
+| Tổng EAD (Exposure at Default) | 27.407,37 M |
+| Tổng EL (tổn thất kỳ vọng) | **950,72 M** |
+| Tỷ lệ EL danh mục | 3,47% |
+| Mean PD | 8,29% |
+| LGD (cố định, Basel II FIRB) | 45,0% |
+| Tỷ lệ vỡ nợ thực tế | 8,2% |
 
-### 8.2 Vốn kinh tế (Basel II)
+### 8.2 Vốn kinh tế
 
-| Đại lượng | Triệu |
-|-----------|------:|
-| Tổn thất Kỳ vọng (EL) | 950.72 |
-| Tổn thất Bất thường (UL) | 2,852.17 |
-| **Vốn kinh tế ước tính** | **4,278.25** |
+| Đại lượng | M |
+|-----------|--:|
+| Tổn thất kỳ vọng (EL) | 950,72 |
+| Tổn thất ngoài kỳ vọng (UL) | 2.852,17 |
+| **Vốn kinh tế ước tính** | **4.278,25** |
 
-Công thức: **EL = PD × LGD × EAD** (PD từ GBT, LGD = 0.45 cố định theo Basel II Foundation IRB, EAD = `AMT_CREDIT`).
+Công thức: **EL = PD × LGD × EAD** (PD từ GBT, LGD = 0,45 cố định theo Basel II Foundation IRB, EAD = `AMT_CREDIT`).
 
 ### 8.3 Phân tầng 4 tier
 
-Bằng chứng rằng mô hình **phân tách thực sự**, không phải chỉ có ROC-AUC đẹp trên giấy:
+Bằng chứng mô hình **tách rủi ro trong thực tế**, không chỉ trên đường ROC:
 
-| Tầng | Số KH | % DM | EAD (M) | EL (M) | EL rate | PD TB |
-|------|------:|-----:|--------:|-------:|--------:|------:|
-| 🟢 Thấp | 34,822 | 75.93% | 21,629.76 | 455.88 | 2.11% | 4.78% |
-| 🟠 Trung bình | 7,465 | 16.28% | 3,987.75 | 247.16 | 6.20% | 13.82% |
-| 🔴 Cao | 2,630 | 5.73% | 1,325.93 | 153.26 | 11.56% | 25.69% |
-| ⚫ **Rất cao** | **942** | **2.05%** | **463.93** | **94.42** | **20.35%** | **45.49%** |
+| Tier | Khách hàng | % danh mục | EAD (M) | EL (M) | Tỷ lệ EL | Mean PD |
+|------|-----------:|-----------:|--------:|-------:|---------:|--------:|
+| 🟢 Low | 34.822 | 75,93% | 21.629,76 | 455,88 | 2,11% | 4,78% |
+| 🟠 Medium | 7.465 | 16,28% | 3.987,75 | 247,16 | 6,20% | 13,82% |
+| 🔴 High | 2.630 | 5,73% | 1.325,93 | 153,26 | 11,56% | 25,69% |
+| ⚫ **Very High** | **942** | **2,05%** | **463,93** | **94,42** | **20,35%** | **45,49%** |
 
-**Nhận xét chính:**
-- Đuôi mỏng (2.05% danh mục) nhưng tỉ lệ EL gấp **9.6 lần** tầng Thấp (20.35% vs 2.11%)
-- Quy tắc Basel: đuôi tiêu thụ hầu hết vốn kinh tế dù chỉ chiếm <5% danh mục — đúng như quan sát thực tế
+Đuôi mỏng (2,05% danh mục) mang tỷ lệ EL gấp **9,6 lần** tier Low — nhất quán với quan sát Basel rằng phần đuôi tiêu tốn phần lớn vốn kinh tế.
 
-### 8.4 Stress test vĩ mô
+### 8.4 Stress testing vĩ mô
 
-Bốn kịch bản nhân tử áp lên PD và LGD:
+Bốn kịch bản nhân hệ số áp lên PD và LGD:
 
-| Kịch bản | PD× | LGD× | Tổng EL (M) | EL rate | Vốn (M) | KH rủi ro cao |
-|----------|----:|-----:|------------:|--------:|--------:|--------------:|
-| Cơ sở (baseline) | 1.0 | 1.0 | 950.72 | 3.47% | 2,852.17 | 3,572 |
-| Suy thoái nhẹ | 1.5 | 1.1 | 1,567.68 | 5.72% | 4,703.05 | 7,255 |
-| Khủng hoảng 2008 | 2.5 | 1.3 | 3,047.41 | 11.12% | 9,142.22 | 14,799 |
-| **Thiên nga đen** | **4.0** | **1.5** | **5,376.49** | **19.62%** | **16,129.48** | **24,623** |
+| Kịch bản | PD× | LGD× | Tổng EL (M) | Tỷ lệ EL | Vốn (M) | KH rủi ro cao |
+|----------|----:|-----:|------------:|---------:|--------:|--------------:|
+| Cơ sở | 1,0 | 1,0 | 950,72 | 3,47% | 2.852,17 | 3.572 |
+| Suy thoái nhẹ | 1,5 | 1,1 | 1.567,68 | 5,72% | 4.703,05 | 7.255 |
+| Khủng hoảng kiểu 2008 | 2,5 | 1,3 | 3.047,41 | 11,12% | 9.142,22 | 14.799 |
+| **Thiên nga đen** | **4,0** | **1,5** | **5.376,49** | **19,62%** | **16.129,48** | **24.623** |
 
-**Hai con số đáng nhớ:**
-- Thiên nga đen: EL tăng **5.66×** (từ 950.72 M → 5,376.49 M)
-- Số KH rủi ro cao tăng **~7×** (3,572 → 24,623)
-
-> Ước lượng PD tại thời điểm gốc, dù hiệu chỉnh tốt đến đâu, vẫn không đủ nếu thiếu một tầng kiểm tra căng thẳng đánh giá lại sổ sách dưới các nhân tố bất lợi.
+Ở kịch bản thiên nga đen, EL tăng **5,66 lần** và nhóm rủi ro cao tăng **~7 lần** — ước lượng PD tại một thời điểm, dù cân chỉnh tốt đến đâu, là chưa đủ nếu thiếu tầng stress testing.
 
 ---
 
-## 9. Hệ thống streaming Kafka + Spark
+## 9. Kafka + Spark Streaming
 
-### 9.1 Kiến trúc
+> **Lưu ý về bước chấm điểm:** demo streaming hiện tại tính PD bằng **heuristic scorer** (tỷ lệ nền + tín hiệu nợ/thu nhập + EXT_SOURCE + việc làm — xem `add_scoring_features()` trong `streaming/spark_streaming.py`), **không phải model GBT đã huấn luyện**. Nạp Spark ML PipelineModel song song với Kafka vượt ngân sách bộ nhớ của VM 3,8 GB. Logic tier / decision / EL phía sau dùng đúng cùng ngưỡng và công thức với batch, và kiến trúc Kafka → Structured Streaming → sinks giữ nguyên khi hoán scorer bằng `model.transform()` — mục ưu tiên trong lộ trình (§13).
 
-```
-Producer            Kafka                Spark Structured Streaming      Sinks
-┌────────┐    ┌──────────────────┐      ┌────────────────────────┐    ┌──────────┐
-│ Python │───►│ loan-applications │─────►│ readStream             │───►│ Kafka    │
-│ JSON   │    │                  │      │ from_json + schema     │    │ scoring- │
-│ acks=  │    │ - 1 partition    │      │ ─── shared core ───    │    │ results  │
-│  all   │    │ - RF=1 (dev)     │      │ assign_tier()          │    └──────────┘
-│ gzip   │    │ - retention=7d   │      │ make_decision()        │    ┌──────────┐
-└────────┘    └──────────────────┘      │ expected_loss()        │───►│ Console  │
-                                        │                        │    │ (debug)  │
-                                        │ Window 1 min:          │    └──────────┘
-                                        │ - count, PD avg        │    ┌──────────┐
-                                        │ - approve/reject       │───►│ Parquet  │
-                                        │ - total EL             │    │ (HDFS)   │
-                                        │ watermark=2min         │    └──────────┘
-                                        └────────────────────────┘
-```
+### 9.1 Ngữ nghĩa phân phối (delivery semantics)
 
-### 9.2 Cam kết exactly-once
+| Tầng | Cơ chế | Đảm bảo |
+|------|--------|---------|
+| Producer | `acks=all` — ghi được xác nhận trước khi confirm | Không mất message phía producer |
+| Spark | `checkpointLocation` lưu offset; crash thì tiếp tục từ offset đã commit | Không bỏ sót message |
+| Sink Kafka | Ghi ra `scoring-results` **không transactional** | Có thể **trùng lặp** khi recovery |
 
-| Tầng | Cơ chế |
-|------|--------|
-| Producer | `acks=all` + replication → message ghi vào tất cả replicas trước khi confirm |
-| Spark | `checkpointLocation` lưu offset → nếu crash, khôi phục từ checkpoint |
-| Sink | Ghi topic idempotent → không trùng lặp khi reprocess |
+⇒ Đảm bảo đầu-cuối là **at-least-once**. Exactly-once đòi hỏi sink idempotent hoặc transactional (ví dụ ghi parquet theo `batchId`, hoặc Kafka transactions) — lộ trình (§13). Sink parquet vốn idempotent theo batch nên gần exactly-once hơn sink Kafka. Checkpoint hiện ở `/tmp/spark-checkpoint` (chỉ cho demo; production đặt trên HDFS).
 
-### 9.3 Cấu hình Kafka
+### 9.2 Cấu hình Kafka
 
 | Tham số | Giá trị | Tác dụng |
 |---------|---------|----------|
-| `acks` | `all` | Đảm bảo durability |
-| `compression.type` | `gzip` | Giảm **60–70%** băng thông |
-| `batch.size` | 16 KB | Batch messages tăng throughput |
-| `linger.ms` | 10 ms | Cho phép batch tích lũy nhẹ |
+| `acks` | `all` | Độ bền dữ liệu |
+| `compression.type` | `gzip` | Giảm ~60–70% băng thông |
+| `batch.size` / `linger.ms` | 16 KB / 10 ms | Gộp nhẹ để tăng throughput |
 | `startingOffsets` | `latest` | Chỉ xử lý message mới |
 
-### 9.4 Windowed aggregation
+### 9.3 Gộp theo cửa sổ thời gian
 
 ```python
 scored_df \
@@ -515,46 +423,34 @@ scored_df \
     )
 ```
 
-### 9.5 Kết quả đã xác minh (cửa sổ 1 phút)
+### 9.4 Kết quả demo đã xác minh (cửa sổ 1 phút)
 
-Demo chạy thực tế với 30 đơn vay phát sinh trong 1 phút:
+30 hồ sơ phát trong 1 phút. Các con số này kiểm chứng luồng dữ liệu đầu-cuối (Kafka → Spark → windowed aggregation), không phải chất lượng mô hình — PD ở đây từ demo scorer:
 
 | Chỉ số | Giá trị |
 |--------|--------:|
-| Tổng đơn vay | 30 |
-| 🟢 Duyệt (APPROVE) | 28 |
-| 🟠 Xem xét (REVIEW) | 2 |
-| 🔴 Từ chối (REJECT) | 0 |
-| PD trung bình | 0.0927 |
-| Tổng EL | 1.56 M |
-| Khoản vay trung bình | 1.15 M |
+| Tổng hồ sơ | 30 |
+| 🟢 APPROVE | 28 |
+| 🟠 REVIEW | 2 |
+| 🔴 REJECT | 0 |
+| Mean PD | 0,0927 |
+| Tổng EL | 1,56 M |
 
 ---
 
-## 10. Giám sát mô hình và drift detection
+## 10. Giám sát mô hình & Phát hiện drift
 
-Tầng giám sát **không chỉ là PSI** — kết hợp **bốn phương pháp** bổ sung lẫn nhau, mỗi cái cho một loại drift khác nhau:
+Bốn phương pháp bổ trợ nhau, mỗi phương pháp bắt một kiểu drift khác nhau:
 
 ### 10.1 PSI + KS cho đặc trưng số
 
-**Population Stability Index (PSI):** so sánh phân phối reference (train) vs current (test/production) bằng cách binning theo phân vị của phân phối tham chiếu.
-
-**Ngưỡng Siddiqi (2006):**
-- PSI < 0.10 → ổn định
-- 0.10 ≤ PSI < 0.25 → cần theo dõi
-- PSI ≥ 0.25 → cần tái huấn luyện
-
-**Kolmogorov–Smirnov (KS) hai mẫu:** kiểm định phi tham số xem hai phân phối có khác nhau có ý nghĩa thống kê không. Bổ sung cho PSI để bắt drift dạng "thay đổi đuôi" mà binning có thể bỏ sót.
+**Population Stability Index** so phân phối reference (train) với current (test/production) bằng binning theo quantile của reference, với ngưỡng Siddiqi (2006): < 0,10 ổn định · 0,10–0,25 theo dõi · ≥ 0,25 tái huấn luyện. **Kiểm định Kolmogorov–Smirnov hai mẫu** bổ trợ PSI, bắt được dịch chuyển ở đuôi phân phối mà binning có thể bỏ lỡ.
 
 ### 10.2 Jensen–Shannon divergence cho hạng mục
 
-PSI hoạt động kém với cột hạng mục có **giá trị mới xuất hiện** trong production (không có trong reference). **JS divergence** giải quyết vấn đề này:
+PSI suy yếu khi **hạng mục mới** xuất hiện trong production. JS divergence đối xứng, bị chặn trong [0, 1], và module còn cảnh báo hạng mục chưa từng thấy — tín hiệu sớm của thay đổi taxonomy thượng nguồn.
 
-- Đối xứng, chặn trong [0, 1]
-- Hiểu được như khoảng cách giữa hai phân phối xác suất
-- Phát hiện thêm **hạng mục mới** — chỉ báo sớm taxonomy upstream thay đổi
-
-**Đầu ra đã xác minh:**
+Kết quả đã xác minh:
 
 ```
 NAME_CONTRACT_TYPE   JS=0.0019  [none]
@@ -564,34 +460,24 @@ ORGANIZATION_TYPE    JS=0.0089  [none]
 WALLSMATERIAL_MODE   JS=0.0107  [none]
 ```
 
-⚠️ **Phát hiện đáng chú ý:** Tập test có hạng mục mới `'Unknown'` ở `NAME_FAMILY_STATUS` — drift mà PSI số **không phát hiện được**. Đây chính xác là lý do cần JS bổ sung.
+Tập test chứa hạng mục mới `'Unknown'` trong `NAME_FAMILY_STATUS` — drift mà PSI số **không thể thấy**, chính là lý do tồn tại của tầng hạng mục. (Lý thuyết: arXiv:2511.03807.)
 
-*Nguồn lý thuyết: arXiv:2511.03807 — "Fair and Explainable Credit-Scoring under Concept Drift".*
+### 10.3 Xếp hạng đặc trưng Kruskal–Wallis
 
-### 10.3 Kruskal–Wallis cho tuyển chọn đặc trưng
-
-Xếp hạng phi tham số sức mạnh dự đoán của từng đặc trưng số:
-
-- **Không giả định tính chuẩn hay đồng phương sai** — phù hợp với đặc trưng tài chính lệch (như `AMT_CREDIT`, `DAYS_EMPLOYED`)
-- Xếp hạng theo khoảng cách rank-sum giữa nhóm `TARGET=0` và `TARGET=1`
-- Tất cả 6 đặc trưng top có **p-value < 1e-16** ⇒ ý nghĩa thống kê
-
-Hai điểm `EXT_SOURCE` đứng đầu cả ở correlation (Cell 9 EDA) lẫn ở Kruskal–Wallis → **xác nhận chéo trên hai phương pháp**.
-
-*Nguồn: Ashofteh & Bravo (2021) DOI:10.24433/CO.1963899.v1.*
+Xếp hạng phi tham số sức mạnh dự báo của từng đặc trưng số — không giả định chuẩn tắc hay phương sai bằng nhau, phù hợp với đặc trưng tài chính lệch. Toàn bộ top-6 có p < 1e-16. Hai điểm `EXT_SOURCE` đứng đầu ở cả tương quan (EDA) lẫn Kruskal–Wallis — xác nhận chéo giữa hai phương pháp. (Phương pháp: Ashofteh & Bravo, 2021.)
 
 ### 10.4 Chính sách tái huấn luyện theo drift
 
-Thay vì tái huấn luyện theo lịch cố định (cứ tháng/quý retrain), pipeline áp dụng **chính sách dựa trên drift signal**:
+Thay cho tái huấn luyện theo lịch cố định:
 
 | Điều kiện | Hành động | Mức độ |
 |-----------|-----------|--------|
-| Bất kỳ đặc trưng nào có PSI ≥ 0.25 | `RETRAIN_IMMEDIATE` | Cao |
-| Có ≥ 3 đặc trưng với PSI ∈ [0.10, 0.25) | `RETRAIN_SCHEDULED` | Trung bình |
-| Có 1–2 đặc trưng với PSI ∈ [0.10, 0.25) | `CONTINUE_MONITORING` (watchlist) | Thấp |
-| Tất cả PSI < 0.10 | `CONTINUE_MONITORING` | Không |
+| Bất kỳ đặc trưng nào PSI ≥ 0,25 | `RETRAIN_IMMEDIATE` | Cao |
+| ≥ 3 đặc trưng PSI ∈ [0,10; 0,25) | `RETRAIN_SCHEDULED` | Trung bình |
+| 1–2 đặc trưng PSI ∈ [0,10; 0,25) | `CONTINUE_MONITORING` (watchlist) | Thấp |
+| Toàn bộ PSI < 0,10 | `CONTINUE_MONITORING` | Không |
 
-**Kết quả chạy thực tế trên VM** (lưu vào `data/08_reporting/retraining_decision.json`):
+Kết quả chạy thực trên VM (lưu tại `data/08_reporting/retraining_decision.json`):
 
 ```
 ✓ RETRAINING DECISION: CONTINUE_MONITORING
@@ -599,219 +485,141 @@ Thay vì tái huấn luyện theo lịch cố định (cứ tháng/quý retrain)
   Reason: No drift detected.
 ```
 
-**Lợi ích:** tránh tái huấn luyện không cần thiết khi dữ liệu ổn định, kích hoạt nhanh khi thực sự có thay đổi phân phối.
-
-*Nguồn lý thuyết: WJARR 2025 — "Machine learning for credit scoring and loan default prediction".*
-
 ---
 
-## 11. Hướng dẫn chạy
+## 11. Khởi động nhanh
 
-### 11.1 Prerequisites
+### Yêu cầu
 
-| Yêu cầu | Phiên bản | Ghi chú |
-|---------|-----------|---------|
-| Python | 3.10 hoặc 3.12 | PySpark 3.5 yêu cầu |
-| Java JDK | 11 | Bắt buộc cho Spark |
-| Hadoop | 3.3.6 | HDFS + YARN, pseudo-distributed |
-| Docker | Desktop / Engine | Cho Kafka stack |
-| RAM | ≥ 4 GB | Đã test trên VM 3.8 GB + 2 GB swap |
+Python 3.10/3.12 · Java JDK 11 · Hadoop 3.3.6 (pseudo-distributed) · Docker · ≥ 4 GB RAM (đã kiểm chứng trên VM 3,8 GB + 2 GB swap).
 
-### 11.2 Cài đặt
+### Cài đặt
 
 ```bash
-# Clone
 git clone https://github.com/muahahaha55/Big_Data_Final_Exam.git
 cd Big_Data_Final_Exam
-
-# Virtual environment
-python -m venv .venv
-source .venv/bin/activate           # Linux/macOS
-# .venv\Scripts\activate            # Windows
-
-# Dependencies
+python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### 11.3 Download dữ liệu
+### Dữ liệu
 
-Từ [Kaggle Home Credit Default Risk](https://www.kaggle.com/c/home-credit-default-risk/data), tải các file CSV và đặt vào `data/01_raw/`:
-
-```
-data/01_raw/
-├── application_train.csv         (bắt buộc)
-├── application_test.csv          (cho inference demo)
-├── bureau.csv
-├── bureau_balance.csv
-├── previous_application.csv
-├── installments_payments.csv
-├── credit_card_balance.csv
-└── POS_CASH_balance.csv
-```
-
-### 11.4 Upload lên HDFS
+Tải CSV từ [Kaggle](https://www.kaggle.com/c/home-credit-default-risk/data) vào `data/01_raw/`, rồi upload lên HDFS:
 
 ```bash
-# Khởi động Hadoop
 start-dfs.sh && start-yarn.sh
-
-# Upload raw data
 hdfs dfs -mkdir -p /user/$USER/credit_risk/raw
 hdfs dfs -put data/01_raw/*.csv /user/$USER/credit_risk/raw/
-
-# Verify
-hdfs dfs -ls /user/$USER/credit_risk/raw/
 ```
 
-### 11.5 Pipeline batch
+### Pipeline batch
 
 ```bash
-# Khởi động MLflow tracking server
 mlflow server --host 0.0.0.0 --port 5000 &
 
-# Chạy từng bước
-python pipelines/etl_pipeline.py                    # Load + join + features
-python pipelines/training_pipeline.py               # GBT + MLflow logging
-python pipelines/risk_pipeline.py                   # Tier + EL + stress
-python pipelines/monitoring_pipeline.py             # PSI + KS
-python pipelines/feature_selection_pipeline.py      # Kruskal–Wallis
-python pipelines/categorical_drift_pipeline.py      # JS divergence
+python pipelines/etl_pipeline.py                 # load + join + đặc trưng
+python pipelines/training_pipeline.py            # GBT + log MLflow
+python pipelines/risk_pipeline.py                # tier + EL + stress
+python pipelines/monitoring_pipeline.py          # PSI + KS
+python pipelines/feature_selection_pipeline.py   # Kruskal–Wallis
+python pipelines/categorical_drift_pipeline.py   # JS divergence
 
-# Hoặc qua Makefile
-make pipeline
+# hoặc: make pipeline
 ```
 
-### 11.6 Pipeline streaming
+### Pipeline streaming
 
 ```bash
-# 1. Khởi động Kafka + Zookeeper qua Docker Compose
-make stack-up
+make stack-up                                    # Kafka + Zookeeper qua Docker
 
-# 2. Tạo topic
 kafka-topics.sh --create --topic loan-applications \
   --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
 kafka-topics.sh --create --topic scoring-results \
   --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
 
-# 3. Terminal 1 — Spark Streaming scorer
+# Terminal 1 — Spark Streaming scorer
 python streaming/spark_streaming.py --output console --trigger 10
-
-# 4. Terminal 2 — Kafka producer (phát đơn vay)
+# Terminal 2 — producer
 python streaming/kafka_producer.py --mode random --rate 3 --total 30
-
-# 5. (Tùy chọn) Terminal 3 — Consumer đọc kết quả
+# Terminal 3 (tùy chọn) — consumer kết quả
 python streaming/kafka_consumer.py --topic scoring-results
 ```
 
-### 11.7 UIs khi stack chạy
+### Giao diện web
 
-| Service | URL | Vai trò |
-|---------|-----|---------|
-| HDFS Namenode | http://localhost:9870 | Xem block, file system |
-| YARN ResourceManager | http://localhost:8088 | Xem job, container |
-| Spark Application UI | http://localhost:4040 | Xem stages, executors, SQL plans |
-| MLflow Tracking | http://localhost:5000 | Xem runs, metrics, registered models |
-| Kafka UI (nếu enable) | http://localhost:8080 | Xem topics, messages, consumer groups |
-
-> 💡 **Demo tip:** Trên VM Ubuntu, Firefox không ổn định. Dùng **CLI** (`hdfs dfs`, `kafka-console-consumer.sh`) thay cho web UI khi cần snapshot.
-
-### 11.8 EDA notebook
-
-Notebook EDA chạy trên Google Colab với driver memory 8 GB:
-
-```bash
-jupyter lab notebooks/EDA_Home_Credit_Default_Risk.ipynb
-```
-
-13 cell phân tích: tổng quan 7 bảng, phân phối TARGET, missing analysis, phân phối ĐT số theo TARGET, ma trận tương quan, tỉ lệ vỡ nợ theo hạng mục, demo join, Kruskal–Wallis ranking.
+HDFS NameNode `:9870` · YARN RM `:8088` · Spark UI `:4040` · MLflow `:5000` · Kafka UI `:8080`
 
 ---
 
 ## 12. Kết quả thực nghiệm
 
-### Bảng tổng hợp
-
 | Hạng mục | Kết quả | Trạng thái |
-|----------|---------|-----------|
-| ETL: 7 bảng → master parquet | 307,511 × ~200 cột | ✅ Verified |
-| ROC-AUC | **0.7663** | ✅ MLflow |
-| KS | **0.4016** (vượt 0.30) | ✅ MLflow |
-| Calibration (PD avg vs actual) | 8.29% vs 8.2% | ✅ Verified |
-| Tổng EL danh mục | 950.72 M | ✅ JSON report |
-| Vốn kinh tế Basel II | 4,278.25 M | ✅ JSON report |
-| 4 stress scenarios | EL ×1.0 → ×5.66 | ✅ JSON report |
-| Streaming throughput | 30 đơn / 1 phút window | ✅ Console verified |
-| Drift decision | `CONTINUE_MONITORING` (no drift) | ✅ JSON report |
-| Top feature Kruskal–Wallis | EXT_SOURCE_3 (H=4,672.97) | ✅ MLflow |
+|----------|---------|------------|
+| ETL: 7 bảng → master parquet | 307.511 × ~200 cột | ✅ Xác minh trên HDFS |
+| ROC-AUC | **0,7663** | ✅ MLflow |
+| KS | **0,4016** (> ngưỡng 0,30) | ✅ MLflow |
+| Cân chỉnh (mean PD vs thực tế) | 8,29% vs 8,2% | ✅ Xác minh |
+| EL danh mục | 950,72 M | ✅ Báo cáo JSON |
+| Vốn kinh tế Basel II | 4.278,25 M | ✅ Báo cáo JSON |
+| 4 kịch bản stress | EL ×1,0 → ×5,66 | ✅ Báo cáo JSON |
+| Streaming đầu-cuối (demo scorer) | 30 hồ sơ / cửa sổ 1 phút | ✅ Console |
+| Quyết định drift | `CONTINUE_MONITORING` (không drift) | ✅ Báo cáo JSON |
+| Đặc trưng Kruskal–Wallis đứng đầu | EXT_SOURCE_3 (H = 4.672,97) | ✅ MLflow |
 
-### Files output cần lưu ý
-
-| File | Vai trò |
-|------|---------|
-| `data/08_reporting/portfolio_risk_report.json` | EL, vốn kinh tế, phân tầng 4 tier |
-| `data/08_reporting/stress_test_report.json` | 4 kịch bản vĩ mô |
-| `data/08_reporting/drift_report.json` | PSI + KS + JS theo từng đặc trưng |
-| `data/08_reporting/retraining_decision.json` | Quyết định cuối cùng |
-| `BigData_Technical_Report.docx` | Báo cáo kỹ thuật ~21 trang |
+Bằng chứng chính: bốn báo cáo JSON trong `data/08_reporting/` và báo cáo kỹ thuật trong `documents/`.
 
 ---
 
-## 13. Hạn chế trung thực
+## 13. Hạn chế đã biết & Lộ trình
 
-Liệt kê tường minh là có chủ đích. Mỗi mục đều ánh xạ vào lộ trình mở rộng trong báo cáo kỹ thuật (§11).
+Liệt kê có chủ đích — mọi khẳng định phía trên đều được giới hạn trong phạm vi đã thực đo.
 
-### Ràng buộc kỹ thuật
+**Ràng buộc kỹ thuật**
 
-- **Triển khai single-node pseudo-distributed** — chưa lên cụm thật. Đường xử lý sẽ scale theo lý thuyết nhưng chưa kiểm chứng trên cụm nhiều worker.
-- **Chưa benchmark Spark optimisation định lượng** — AQE, Kryo, Snappy được bật ở cấu hình, nhưng chưa có số đo trước/sau để chứng minh độ tăng tốc cụ thể trên dataset này.
-- **Spark MLlib GBT thường thua LightGBM / XGBoost 1–2 pp ROC-AUC** trên các benchmark Kaggle — đây là **đánh đổi có chủ ý** để giữ huấn luyện trong runtime Spark, tránh overhead chuyển dữ liệu.
-- **Phát hiện drift offline** (so train.parquet vs test.parquet) — chưa có rolling window thực sự theo thời gian production.
+- Triển khai pseudo-distributed một nút; khả năng scale-out được hỗ trợ về kiến trúc nhưng chưa kiểm chứng trên cụm nhiều worker.
+- AQE / Kryo / Snappy được bật nhưng chưa benchmark định lượng (không có số trước/sau trên bộ dữ liệu này).
+- Streaming chấm điểm bằng heuristic PD, không phải GBT đã huấn luyện (§9) — kiến trúc là thật, bước chấm điểm là placeholder chờ dư địa bộ nhớ.
+- Quy tắc tier/decision/EL bị lặp code giữa batch và streaming (cùng ngưỡng, hai chỗ cài đặt) — chưa tách module `credit_risk/inference/` dùng chung.
+- Đảm bảo phân phối là at-least-once, không phải exactly-once (§9.1).
+- `bureau_balance` (27,3M dòng) chưa có aggregator, chưa đóng góp đặc trưng (§6).
+- `scorecard.py` (WoE/IV) và `explainer.py` có trong package nhưng chưa pipeline nào gọi.
 
-### Ràng buộc nghiên cứu
+**Ràng buộc nghiên cứu**
 
-- **Chưa có ablation study** để đo đóng góp cụ thể của đặc trưng đa bảng. Không thể tuyên bố "+X pp ROC-AUC nhờ join 7 bảng" mà chưa có run đối chứng.
-- **Chỉ một lần chạy huấn luyện** — chưa có phương sai cross-validation. Mọi metric trong báo cáo là **point estimate**, không phải khoảng tin cậy.
-- **Stress test dùng nhân tử cố định** (PD×1.5, 2.5, 4.0) — chưa có satellite model vĩ mô liên kết với GDP / unemployment thực tế.
-- **Chưa kiểm định ý nghĩa thống kê** khi so sánh giữa các ngưỡng drift — quyết định tái huấn luyện hiện dựa trên ngưỡng Siddiqi rule-of-thumb chứ không phải bootstrap CI.
+- Chưa công bố kết quả ablation — không thể khẳng định "+X điểm phần trăm ROC-AUC nhờ join đa bảng" khi thiếu lần chạy đối chứng (`ablation_pipeline.py` tồn tại cho mục đích này).
+- Một lần huấn luyện duy nhất — mọi chỉ số là ước lượng điểm, không có khoảng tin cậy cross-validation.
+- Stress test dùng hệ số nhân cố định; chưa có mô hình vệ tinh vĩ mô nối với GDP/thất nghiệp.
+- Ngưỡng tái huấn luyện theo quy tắc kinh nghiệm Siddiqi, chưa dùng khoảng tin cậy bootstrap.
 
-### Hướng phát triển
+**Lộ trình**
 
-1. Deploy lên Spark cluster (YARN / K8s) để xác minh scale-out
-2. Benchmark định lượng AQE / Kryo (warm/cold cache, các quy mô shuffle)
-3. Ablation study: train mô hình "chỉ application_train" để đo Δ ROC-AUC từ join 7 bảng
-4. K-fold cross-validation để có khoảng tin cậy cho mọi metric
-5. Satellite macro model: PD × (a + b·ΔGDP + c·ΔUnemployment)
-6. Rolling drift detection với cửa sổ trượt theo ngày / tuần
-7. Feature store (Feast) cho quản lý đặc trưng
+1. Triển khai trên cụm Spark thật (YARN/K8s) để kiểm chứng scale-out
+2. Benchmark định lượng AQE/Kryo
+3. Công bố kết quả ablation (chỉ application_train vs đủ bảng join)
+4. K-fold CV cho khoảng tin cậy
+5. Mô hình vệ tinh vĩ mô: PD × (a + b·ΔGDP + c·ΔThất nghiệp)
+6. Phát hiện drift theo cửa sổ trượt (ngày/tuần)
+7. Feature store (Feast)
+8. Tách `credit_risk/inference/` dùng chung; thay heuristic streaming bằng `model.transform()` với GBT từ MLflow registry
+9. Sink Kafka exactly-once (ghi idempotent theo `batchId` hoặc Kafka transactions); chuyển checkpoint lên HDFS
+10. Aggregator nhóm DPD cho `bureau_balance`; nối `scorecard.py` (bảng IV) và `explainer.py` vào pipeline
 
 ---
 
 ## 14. Tài liệu tham khảo
 
-### Học thuật
+**Học thuật**
 
-1. **Ashofteh, A. & Bravo, J. M. (2021).** *A non-parametric-based computationally efficient approach for credit scoring.* Data Science for Financial Econometrics. DOI: [10.24433/CO.1963899.v1](https://doi.org/10.24433/CO.1963899.v1) — cơ sở Kruskal–Wallis feature selection và multi-state borrower transitions.
+1. Ashofteh, A. & Bravo, J. M. (2021). *A non-parametric-based computationally efficient approach for credit scoring.* DOI: [10.24433/CO.1963899.v1](https://doi.org/10.24433/CO.1963899.v1)
+2. *Fair and Explainable Credit-Scoring under Concept Drift.* arXiv:2511.03807
+3. Siddiqi, N. (2006). *Credit Risk Scorecards.* Wiley
+4. Basel Committee on Banking Supervision (2006). *International Convergence of Capital Measurement and Capital Standards (Basel II).*
+5. Federal Reserve (2011). *SR 11-7: Guidance on Model Risk Management.*
+6. WJARR (2025). *Machine learning for credit scoring and loan default prediction.*
 
-2. **"Fair and Explainable Credit-Scoring under Concept Drift."** arXiv:2511.03807 — cơ sở Jensen–Shannon cho categorical drift và quan sát PD biến động thời gian.
+**Kỹ thuật**
 
-3. **Siddiqi, N. (2006).** *Credit Risk Scorecards: Developing and Implementing Intelligent Credit Scoring.* Wiley — ngưỡng PSI và phương pháp WoE/IV.
-
-4. **Basel Committee on Banking Supervision (2006).** *International Convergence of Capital Measurement and Capital Standards (Basel II).* — công thức EL/UL, LGD Foundation IRB.
-
-5. **Federal Reserve (2011).** *SR 11-7: Guidance on Model Risk Management.* — chuẩn quản lý rủi ro mô hình.
-
-6. **WJARR (2025).** *Machine learning for credit scoring and loan default prediction.* — cơ sở chính sách tái huấn luyện theo drift.
-
-### Công nghệ
-
-7. **Home Credit Default Risk.** Kaggle Competition, 2018. <https://www.kaggle.com/c/home-credit-default-risk>
-8. **Apache Spark Documentation v3.5.0.** <https://spark.apache.org/docs/3.5.0/>
-9. **Spark Structured Streaming Programming Guide.** <https://spark.apache.org/docs/3.5.0/structured-streaming-programming-guide.html>
-10. **Spark + Kafka Integration Guide.** <https://spark.apache.org/docs/3.5.0/structured-streaming-kafka-integration.html>
-11. **Apache Kafka Documentation.** <https://kafka.apache.org/documentation/>
-12. **MLflow Documentation.** <https://mlflow.org/docs/latest/>
-13. **Hadoop HDFS Architecture.** <https://hadoop.apache.org/docs/r3.3.6/hadoop-project-dist/hadoop-hdfs/HdfsDesign.html>
-14. **Karau, H. & Warren, R. (2017).** *High Performance Spark.* O'Reilly.
-
----
-
+7. [Home Credit Default Risk](https://www.kaggle.com/c/home-credit-default-risk) — Kaggle, 2018
+8. [Apache Spark 3.5 Documentation](https://spark.apache.org/docs/3.5.0/) · [Structured Streaming Guide](https://spark.apache.org/docs/3.5.0/structured-streaming-programming-guide.html) · [Kafka Integration](https://spark.apache.org/docs/3.5.0/structured-streaming-kafka-integration.html)
+9. [Apache Kafka Documentation](https://kafka.apache.org/documentation/) · [MLflow Documentation](https://mlflow.org/docs/latest/) · [HDFS Architecture](https://hadoop.apache.org/docs/r3.3.6/hadoop-project-dist/hadoop-hdfs/HdfsDesign.html)
+10. Karau, H. & Warren, R. (2017). *High Performance Spark.* O'Reilly

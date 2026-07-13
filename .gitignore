@@ -23,8 +23,8 @@ data/04_feature/*
 data/05_model_input/*
 data/06_models/*
 data/07_model_output/*
-data/08_reporting/*
 !data/**/.gitkeep
+# 08_reporting được commit — là bằng chứng kết quả (JSON reports)
 
 # MLflow
 mlruns/
