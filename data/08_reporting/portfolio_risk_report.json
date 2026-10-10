@@ -48,10 +48,25 @@
       "avg_pd": 0.4549
     }
   ],
-  "capital_estimate": {
+  "capital_requirement": {
+    "method": "basel_ii_irb_retail_asrf",
+    "label": "IRB capital requirement (estimate)",
+    "confidence_level": 0.999,
+    "pd_floor": 0.0003,
     "expected_loss_million": 950.72,
-    "unexpected_loss_million": 2852.17,
-    "economic_capital_million": 4278.25
+    "irb_capital_requirement_million": 1547.84,
+    "irb_rwa_million": 19348.03,
+    "capital_to_ead_pct": 5.648,
+    "rwa_density_pct": 70.59,
+    "rule_of_thumb_cross_check": {
+      "note": "ASSUMPTION, not Basel \u2014 reported only to quantify the gap vs the IRB formula",
+      "ul_multiple_of_el": 3.0,
+      "ec_multiple_of_ul": 1.5,
+      "ul_million": 2852.17,
+      "ec_million": 4278.25,
+      "ul_over_irb_capital": 1.84,
+      "ec_over_irb_capital": 2.76
+    }
   },
   "stress_test": {
     "n_customers": 45859,
@@ -69,7 +84,7 @@
         "avg_lgd": 0.45,
         "customers_high_risk": 3572,
         "customers_default_zone": 229,
-        "capital_required_estimate_million": 2852.17
+        "irb_capital_requirement_million": 1547.84
       },
       {
         "scenario": "mild_recession",
@@ -83,7 +98,7 @@
         "avg_lgd": 0.495,
         "customers_high_risk": 7255,
         "customers_default_zone": 1082,
-        "capital_required_estimate_million": 4703.05
+        "irb_capital_requirement_million": 1858.43
       },
       {
         "scenario": "severe",
@@ -97,7 +112,7 @@
         "avg_lgd": 0.585,
         "customers_high_risk": 14799,
         "customers_default_zone": 3572,
-        "capital_required_estimate_million": 9142.22
+        "irb_capital_requirement_million": 2434.81
       },
       {
         "scenario": "black_swan",
@@ -111,7 +126,7 @@
         "avg_lgd": 0.675,
         "customers_high_risk": 24623,
         "customers_default_zone": 8014,
-        "capital_required_estimate_million": 16129.48
+        "irb_capital_requirement_million": 3013.33
       }
     ],
     "comparison": {
@@ -133,7 +148,7 @@
       }
     }
   },
-  "model_version": "2",
+  "model_version": 2,
   "model_stage": "Production",
-  "generated_at": "2026-06-24T10:00:12.906979"
+  "generated_at": "2026-10-10T05:15:28.511148"
 }
