@@ -11,6 +11,10 @@ Portfolio-level metrics:
     Total EL              — expected dollar loss across portfolio
     Portfolio EL rate     — EL / total EAD (a single comparable number)
     Per-tier EL breakdown — where the loss concentration sits
+
+Capital is NOT computed here. It is non-linear in per-obligor PD, so it cannot
+be derived from portfolio aggregates — see `credit_risk/risk/capital.py`, which
+adds a per-row `irb_capital` column that this module only sums up.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from credit_risk.config import get_config
+from credit_risk.risk.capital import get_capital_config, rule_of_thumb_cross_check
 from credit_risk.risk.segmentation import TIER_ORDER
 from credit_risk.utils.logging import get_logger
 
@@ -39,6 +44,8 @@ class PortfolioMetrics:
     avg_lgd: float = 0.45
     actual_default_rate: float = 0.0
     tier_breakdown: list[dict] = field(default_factory=list)
+    total_irb_capital: float = 0.0
+    has_irb_capital: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -54,7 +61,7 @@ class PortfolioMetrics:
                 "actual_default_rate_pct": round(self.actual_default_rate * 100, 2),
             },
             "risk_tier_breakdown": self.tier_breakdown,
-            "capital_estimate": self._capital_estimate(),
+            "capital_requirement": self._capital_requirement(),
         }
 
     def _interpret(self) -> str:
@@ -69,15 +76,37 @@ class PortfolioMetrics:
             return "Elevated risk (5-10%)"
         return "High risk (>10%) — requires attention"
 
-    def _capital_estimate(self) -> dict:
-        """Simplified Basel II capital: UL ≈ 3 × EL, EC = 1.5 × UL."""
+    def _capital_requirement(self) -> dict:
+        """IRB capital requirement (estimate), summed from the per-obligor column.
+
+        The headline number is the Basel II retail IRB figure. The old EL-multiple
+        heuristic is reported alongside it, labelled as an assumption, purely to
+        show how far it lands from the formula.
+        """
         el = self.total_expected_loss
-        ul = el * 3.0
-        ec = ul * 1.5
+        cap_cfg = get_capital_config()
+
+        if not self.has_irb_capital:
+            return {
+                "method": "unavailable",
+                "note": "no irb_capital column present — run add_irb_capital() before "
+                        "compute_portfolio_metrics() to get a capital figure",
+                "expected_loss_million": round(el / 1e6, 2),
+            }
+
+        cap = self.total_irb_capital
+        rwa = cap * cap_cfg.rwa_multiplier
         return {
+            "method": "basel_ii_irb_retail_asrf",
+            "label": "IRB capital requirement (estimate)",
+            "confidence_level": cap_cfg.confidence_level,
+            "pd_floor": cap_cfg.pd_floor,
             "expected_loss_million": round(el / 1e6, 2),
-            "unexpected_loss_million": round(ul / 1e6, 2),
-            "economic_capital_million": round(ec / 1e6, 2),
+            "irb_capital_requirement_million": round(cap / 1e6, 2),
+            "irb_rwa_million": round(rwa / 1e6, 2),
+            "capital_to_ead_pct": round((cap / self.total_ead * 100) if self.total_ead > 0 else 0.0, 3),
+            "rwa_density_pct": round((rwa / self.total_ead * 100) if self.total_ead > 0 else 0.0, 2),
+            "rule_of_thumb_cross_check": rule_of_thumb_cross_check(el, cap, cap_cfg),
         }
 
 
@@ -111,18 +140,28 @@ def compute_portfolio_metrics(
     lgd_column: str = "lgd",
     target_column: str | None = "TARGET",
     tier_column: str = "risk_tier",
+    capital_column: str = "irb_capital",
 ) -> PortfolioMetrics:
-    """Aggregate portfolio-level risk metrics."""
+    """Aggregate portfolio-level risk metrics.
+
+    If `capital_column` is present (added by `capital.add_irb_capital`), its sum
+    becomes the portfolio IRB capital requirement.
+    """
     df.cache()
 
-    overall = df.agg(
+    has_capital = capital_column in df.columns
+
+    aggs = [
         F.count("*").alias("n"),
         F.sum(ead_column).alias("total_ead"),
         F.sum(el_column).alias("total_el"),
         F.avg(pd_column).alias("avg_pd"),
         F.avg(lgd_column).alias("avg_lgd"),
         F.avg(target_column).alias("actual_dr") if target_column else F.lit(0.0).alias("actual_dr"),
-    ).collect()[0]
+        F.sum(capital_column).alias("total_capital") if has_capital
+        else F.lit(0.0).alias("total_capital"),
+    ]
+    overall = df.agg(*aggs).collect()[0]
 
     total_ead = float(overall["total_ead"] or 0.0)
     total_el = float(overall["total_el"] or 0.0)
@@ -174,6 +213,8 @@ def compute_portfolio_metrics(
         avg_lgd=float(overall["avg_lgd"] or 0.45),
         actual_default_rate=float(overall["actual_dr"] or 0.0),
         tier_breakdown=tier_breakdown,
+        total_irb_capital=float(overall["total_capital"] or 0.0),
+        has_irb_capital=has_capital,
     )
 
     log.info(
@@ -181,5 +222,6 @@ def compute_portfolio_metrics(
         customers=total_customers,
         el_million=round(total_el / 1e6, 2),
         el_rate_pct=round(metrics.portfolio_el_rate * 100, 3),
+        irb_capital_million=round(metrics.total_irb_capital / 1e6, 2) if has_capital else None,
     )
     return metrics

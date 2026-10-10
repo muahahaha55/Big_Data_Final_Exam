@@ -23,6 +23,12 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from credit_risk.config import get_config
+from credit_risk.risk.capital import (
+    CapitalConfig,
+    get_capital_config,
+    is_qrre_col,
+    scenario_capital_col,
+)
 from credit_risk.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -53,7 +59,7 @@ class ScenarioResult:
     avg_lgd: float
     customers_high_risk: int      # PD ≥ 0.20 after stress
     customers_default_zone: int   # PD ≥ 0.50 after stress
-    capital_required_estimate: float  # EL × 3 (simplified UL)
+    irb_capital: float            # Basel II retail IRB capital on the stressed PD/LGD
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,7 +74,7 @@ class ScenarioResult:
             "avg_lgd": round(self.avg_lgd, 4),
             "customers_high_risk": self.customers_high_risk,
             "customers_default_zone": self.customers_default_zone,
-            "capital_required_estimate_million": round(self.capital_required_estimate / 1e6, 2),
+            "irb_capital_requirement_million": round(self.irb_capital / 1e6, 2),
         }
 
 
@@ -112,12 +118,20 @@ def apply_scenario(
     pd_col: str = "pd_score",
     lgd_col: str = "lgd",
     ead_col: str = "ead",
+    cap_cfg: CapitalConfig | None = None,
 ) -> DataFrame:
-    """Apply scenario multipliers and recompute EL.
+    """Apply scenario multipliers, then recompute EL and IRB capital.
 
     PD is clipped at [0, 1] since it's a probability.
     LGD is clipped at [0, 1] (can't lose more than the loan).
+
+    Capital comes from `capital.scenario_capital_col` — the same formula the
+    portfolio report uses — with the asset correlation recomputed from the
+    stressed PD, as Basel prescribes.
     """
+    c = cap_cfg or get_capital_config()
+    qrre = is_qrre_col(df, c)
+
     return df.withColumn(
         f"pd_{scenario.name}",
         F.least(F.lit(1.0), F.col(pd_col) * F.lit(scenario.pd_multiplier))
@@ -127,6 +141,15 @@ def apply_scenario(
     ).withColumn(
         f"el_{scenario.name}",
         F.col(f"pd_{scenario.name}") * F.col(f"lgd_{scenario.name}") * F.col(ead_col)
+    ).withColumn(
+        f"cap_{scenario.name}",
+        scenario_capital_col(
+            F.col(f"pd_{scenario.name}"),
+            F.col(f"lgd_{scenario.name}"),
+            F.col(ead_col),
+            qrre,
+            c,
+        )
     )
 
 
@@ -135,11 +158,13 @@ def aggregate_scenario(df: DataFrame, scenario: ScenarioConfig, ead_col: str = "
     pd_col = f"pd_{scenario.name}"
     lgd_col = f"lgd_{scenario.name}"
     el_col = f"el_{scenario.name}"
+    cap_col = f"cap_{scenario.name}"
 
     agg = df.agg(
         F.count("*").alias("n"),
         F.sum(ead_col).alias("total_ead"),
         F.sum(el_col).alias("total_el"),
+        F.sum(cap_col).alias("total_cap"),
         F.avg(pd_col).alias("avg_pd"),
         F.avg(lgd_col).alias("avg_lgd"),
         F.sum(F.when(F.col(pd_col) >= 0.20, 1).otherwise(0)).alias("high_risk"),
@@ -162,7 +187,7 @@ def aggregate_scenario(df: DataFrame, scenario: ScenarioConfig, ead_col: str = "
         avg_lgd=float(agg["avg_lgd"] or 0.0),
         customers_high_risk=int(agg["high_risk"] or 0),
         customers_default_zone=int(agg["default_zone"] or 0),
-        capital_required_estimate=total_el * 3.0,  # simplified UL proxy
+        irb_capital=float(agg["total_cap"] or 0.0),
     )
 
 
@@ -190,9 +215,10 @@ def run_stress_test(
     log.info("stress_test_started", customers=n_customers, scenarios=len(scenarios))
 
     # Apply all scenarios at once (more efficient than sequential)
+    cap_cfg = get_capital_config()
     df_stressed = df
     for sc in scenarios:
-        df_stressed = apply_scenario(df_stressed, sc, pd_col, lgd_col, ead_col)
+        df_stressed = apply_scenario(df_stressed, sc, pd_col, lgd_col, ead_col, cap_cfg)
     df_stressed.cache()
 
     # Aggregate each

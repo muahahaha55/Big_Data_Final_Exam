@@ -1,5 +1,15 @@
 """Financial Risk Modeling (Basel II) — scorecard, segmentation, EL, stress testing."""
 
+from credit_risk.risk.capital import (
+    CapitalConfig,
+    add_irb_capital,
+    get_capital_config,
+    irb_k,
+    norm_cdf,
+    norm_ppf,
+    other_retail_correlation,
+    rule_of_thumb_cross_check,
+)
 from credit_risk.risk.expected_loss import (
     PortfolioMetrics,
     add_expected_loss,
@@ -40,6 +50,9 @@ __all__ = [
     "TIER_LOW", "TIER_MEDIUM", "TIER_HIGH", "TIER_VERY_HIGH", "TIER_ORDER",
     # expected loss
     "PortfolioMetrics", "add_expected_loss", "compute_portfolio_metrics",
+    # capital (Basel II IRB)
+    "CapitalConfig", "add_irb_capital", "get_capital_config", "irb_k",
+    "norm_cdf", "norm_ppf", "other_retail_correlation", "rule_of_thumb_cross_check",
     # stress testing
     "ScenarioConfig", "ScenarioResult", "StressTestReport",
     "apply_scenario", "load_scenarios_from_config", "run_stress_test",
