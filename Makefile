@@ -1,4 +1,5 @@
 .PHONY: help install install-dev clean test etl train risk drift-check pipeline notebook \
+       ablation-precompute ablation-step ablation-loo-step \
        stack-up stack-down stack-logs stream-produce stream-score stream-consume
 
 COMPOSE := docker compose -f infrastructure/docker-compose.yml
@@ -39,6 +40,25 @@ risk:  ## Risk analysis: segmentation + EL + stress testing
 
 drift-check:  ## Drift detection (PSI + KS test)
 	python pipelines/monitoring_pipeline.py
+
+# ── Ablation (T1.2) ────────────────────────────────────────────
+# Chạy precompute một lần, rồi từng bước N=1..6 (mỗi bước một process
+# riêng để JVM trả lại heap — an toàn hơn trên VM 3,8 GB).
+# Cần MLFLOW_TRACKING_URI, ví dụ: export MLFLOW_TRACKING_URI=file:./mlruns
+ablation-precompute:  ## Ablation: aggregates + application.parquet + split cố định
+	python pipelines/ablation_pipeline.py --phase precompute
+
+ablation-step:  ## Ablation tích lũy: chạy một bước, dùng N=<1..6>
+	@if [ -z "$(N)" ]; then \
+	  echo "Thiếu N. Ví dụ: make ablation-step N=1   (N từ 1 đến 6)"; exit 2; \
+	fi
+	python pipelines/ablation_pipeline.py --phase ablate --mode cumulative --step $(N)
+
+ablation-loo-step:  ## Ablation leave-one-out: chạy một bước, dùng N=<1..7>
+	@if [ -z "$(N)" ]; then \
+	  echo "Thiếu N. Ví dụ: make ablation-loo-step N=1   (N từ 1 đến 7)"; exit 2; \
+	fi
+	python pipelines/ablation_pipeline.py --phase ablate --mode loo --step $(N)
 
 pipeline: etl train risk  ## Chạy toàn bộ pipeline end-to-end
 

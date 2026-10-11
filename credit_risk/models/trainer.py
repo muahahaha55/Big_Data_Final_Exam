@@ -146,6 +146,7 @@ def train_model(
     target_col: str = "TARGET",
     tune: bool = False,
     register: bool = True,
+    run_name: str | None = None,
 ) -> TrainingResult:
     """Full training: fit pipeline, optionally tune, evaluate, log to MLflow.
 
@@ -157,13 +158,16 @@ def train_model(
         target_col: label column name
         tune: run CrossValidator hyperparameter search
         register: register model in MLflow registry
+        run_name: MLflow run name; defaults to '<model_type>_<baseline|tuned>'.
+            Callers that train many models in one study (e.g. the ablation
+            pipeline) pass a distinct name so the runs stay tellable apart.
 
     Returns:
         TrainingResult with metrics, model, mlflow run id
     """
     registry = MLflowRegistry()
     cfg = get_config()
-    run_name = f"{model_type}_{'tuned' if tune else 'baseline'}"
+    run_name = run_name or f"{model_type}_{'tuned' if tune else 'baseline'}"
 
     with registry.start_run(run_name=run_name, tags={"model_type": model_type, "tuned": str(tune)}) as run:
         # ── Build full pipeline (preprocessing + classifier) ──

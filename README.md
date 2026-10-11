@@ -153,7 +153,7 @@ Hai đường xử lý song song, áp dụng **cùng một bộ quy tắc nghi�
 | Quản lý tài nguyên | YARN | Bộ lập lịch chuẩn của hệ sinh thái Hadoop |
 | Tính toán batch | Apache Spark 3.5 + PySpark | Join đa bảng native, một API cho ETL + ML + streaming |
 | Học máy | Spark MLlib (GBTClassifier) | Huấn luyện phân tán ngay trong Spark — không cần xuất dữ liệu |
-| Theo dõi thí nghiệm | MLflow 2.9 (backend SQLite) | Params/metrics/artifacts + model registry, gọn nhẹ cho đồ án |
+| Theo dõi thí nghiệm | MLflow 2.22.5 | Params/metrics/artifacts + model registry, gọn nhẹ cho đồ án |
 | Hàng đợi thông điệp | Apache Kafka 3.5 | Event log phát lại được, chuẩn cho suy luận hướng sự kiện |
 | Xử lý luồng | Spark Structured Streaming | Tái dùng code path của Spark; checkpoint offset cho at-least-once (§9.1) |
 | Điều phối | Make + Docker Compose | Môi trường dev tái lập được (production sẽ dùng Airflow / Argo) |
@@ -161,7 +161,9 @@ Hai đường xử lý song song, áp dụng **cùng một bộ quy tắc nghi�
 
 **Tối ưu Spark đã bật:** Adaptive Query Execution, tuần tự hóa Kryo, chuyển đổi Spark↔pandas tăng tốc bằng PyArrow (dùng trong Kruskal–Wallis), Parquet nén Snappy. AQE và Kryo được bật trong cấu hình nhưng **chưa đo lường định lượng** trên bộ dữ liệu này (§13).
 
-**Điều chỉnh bộ nhớ cho VM 3,8 GB:** `spark.driver.memory=2g`, `spark.executor.memory=1g`, cộng 2 GB swap để hệ điều hành không OOM-kill Spark trong các join nặng nhất. Đây là thích ứng với phần cứng thi cử hạn chế, không phải khuyến nghị production.
+**Điều chỉnh bộ nhớ cho VM 3,8 GB:** `spark.master=local[1]`, `spark.driver.memory=2g`, cộng 2 GB swap để hệ điều hành không OOM-kill Spark trong các join nặng nhất. Cả ba đọc từ mục `spark:` trong `conf/base/config.yaml` nên đổi một chỗ là áp cho mọi pipeline.
+
+> **Lưu ý về `spark.executor.memory`:** trong local mode **không có JVM executor riêng** — driver và executor là cùng một tiến trình, nên `executor.memory=1g` **bị bỏ qua** và ràng buộc thật chỉ là `driver.memory=2g`. Giá trị này vẫn giữ trong config cho ngày chạy trên YARN/K8s. Cùng lý do đó, `local[1]` được chọn thay vì `local[*]`: thêm core chỉ làm nhiều task cùng tranh một heap 2 GB, tăng đỉnh bộ nhớ chứ không tăng thông lượng trên máy này.
 
 ---
 
