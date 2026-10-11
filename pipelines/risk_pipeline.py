@@ -18,6 +18,7 @@ from credit_risk.config import get_config, project_root
 from credit_risk.models.registry import MLflowRegistry
 from credit_risk.risk import (
     add_expected_loss,
+    add_irb_capital,
     assign_risk_tier,
     compute_portfolio_metrics,
     run_stress_test,
@@ -62,7 +63,25 @@ def run_risk_pipeline() -> None:
 
         # ── Assign risk tiers ─────────────────────────────────
         scored = assign_risk_tier(scored, pd_column="pd_score")
+
+        # ── Basel II IRB capital, per obligor ─────────────────
+        scored = add_irb_capital(scored, pd_column="pd_score")
         scored.cache()
+
+        # ── Persist the scored portfolio (S4) ─────────────────
+        # Downstream risk analytics (threshold curves, dashboard) read this
+        # instead of reloading the model and re-scoring in Spark.
+        keep = [
+            c for c in [
+                "SK_ID_CURR", cfg["data"]["target_column"], "NAME_CONTRACT_TYPE",
+                "pd_score", "lgd", "ead", "expected_loss", "risk_tier",
+                "basel_exposure_class", "basel_correlation", "irb_k", "irb_capital",
+            ] if c in scored.columns
+        ]
+        scored_path = project_root() / "data" / "07_model_output" / "scored_test.parquet"
+        scored_path.parent.mkdir(parents=True, exist_ok=True)
+        scored.select(*keep).coalesce(1).write.mode("overwrite").parquet(str(scored_path))
+        log.info("scored_portfolio_saved", path=str(scored_path), columns=len(keep))
 
         seg_summary = summarize_segmentation(scored)
         log.info("segmentation_done", **seg_summary.to_dict())
@@ -104,10 +123,22 @@ def run_risk_pipeline() -> None:
         print(f"  EL rate:         {ov['portfolio_el_rate_pct']:>14.3f}%")
         print(f"  Avg PD:          {ov['avg_pd']:>15.4f}")
         print(f"  Assessment:      {ov['interpretation']}")
+        cap = report["capital_requirement"]
+        if cap.get("method") == "basel_ii_irb_retail_asrf":
+            print("-" * 60)
+            print(f"  IRB capital:     ${cap['irb_capital_requirement_million']:>14,.2f}M"
+                  f"   ({cap['capital_to_ead_pct']:.3f}% of EAD)")
+            print(f"  IRB RWA:         ${cap['irb_rwa_million']:>14,.2f}M"
+                  f"   (density {cap['rwa_density_pct']:.2f}%)")
+            rot = cap["rule_of_thumb_cross_check"]
+            print(f"  [cross-check, assumption] 3xEL = ${rot['ul_million']:,.2f}M "
+                  f"({rot['ul_over_irb_capital']}x IRB), "
+                  f"4.5xEL = ${rot['ec_million']:,.2f}M ({rot['ec_over_irb_capital']}x IRB)")
         print("=" * 60)
         print("  Stress test results:")
         for s in report["stress_test"]["scenarios"]:
             print(f"    {s['scenario']:<18}EL=${s['total_el_million']:>10,.1f}M  "
+                  f"cap=${s['irb_capital_requirement_million']:>10,.1f}M  "
                   f"PD×{s['pd_multiplier']:.1f}  LGD×{s['lgd_multiplier']:.1f}")
         print("=" * 60 + "\n")
 

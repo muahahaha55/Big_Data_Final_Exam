@@ -4,9 +4,9 @@
 ![Spark](https://img.shields.io/badge/Apache%20Spark-3.5-E25A1C?logo=apachespark&logoColor=white)
 ![Kafka](https://img.shields.io/badge/Apache%20Kafka-3.5-231F20?logo=apachekafka)
 ![Hadoop](https://img.shields.io/badge/Hadoop-3.3.6-66CCFF?logo=apachehadoop&logoColor=black)
-![MLflow](https://img.shields.io/badge/MLflow-2.9-0194E2?logo=mlflow&logoColor=white)
+![MLflow](https://img.shields.io/badge/MLflow-2.22.5-0194E2?logo=mlflow&logoColor=white)
 
-> Hệ thống rủi ro tín dụng phân tán đầu-cuối trên bộ dữ liệu **Home Credit Default Risk** (307.511 hồ sơ vay, 7 bảng quan hệ, ~58,4 triệu dòng): ETL đa bảng và huấn luyện GBT trên Spark/HDFS/YARN, phân tích rủi ro danh mục theo Basel II (tổn thất kỳ vọng, vốn kinh tế, stress testing vĩ mô), đường chấm điểm streaming Kafka + Spark Structured Streaming, và chính sách tái huấn luyện khi phát hiện drift (PSI + KS + Jensen–Shannon).
+> Hệ thống rủi ro tín dụng phân tán đầu-cuối trên bộ dữ liệu **Home Credit Default Risk** (307.511 hồ sơ vay, 7 bảng quan hệ, ~58,4 triệu dòng): ETL đa bảng và huấn luyện GBT trên Spark/HDFS/YARN, phân tích rủi ro danh mục theo Basel II (tổn thất kỳ vọng, vốn yêu cầu theo IRB, stress testing vĩ mô), đường chấm điểm streaming Kafka + Spark Structured Streaming, và chính sách tái huấn luyện khi phát hiện drift (PSI + KS + Jensen–Shannon).
 
 **Tác giả:** Nguyễn Việt Phương · Bài tập lớn học phần Big Data
 
@@ -33,7 +33,7 @@
 
 ## 1. Bài toán & Lý do dùng Big Data
 
-**Nhiệm vụ:** dự đoán **xác suất vỡ nợ (PD — Probability of Default)** cho từng hồ sơ vay từ nhiều nguồn dữ liệu quan hệ, sau đó lượng hóa rủi ro danh mục theo khung **Basel II** (tổn thất kỳ vọng, tổn thất ngoài kỳ vọng, vốn kinh tế).
+**Nhiệm vụ:** dự đoán **xác suất vỡ nợ (PD — Probability of Default)** cho từng hồ sơ vay từ nhiều nguồn dữ liệu quan hệ, sau đó lượng hóa rủi ro danh mục theo khung **Basel II** (tổn thất kỳ vọng, vốn yêu cầu theo hàm trọng số rủi ro IRB, stress testing).
 
 Đây không phải bài toán "pandas vừa khít bộ nhớ":
 
@@ -141,7 +141,7 @@ Hai đường xử lý song song, áp dụng **cùng một bộ quy tắc nghi�
                                          └─────────┘ └──────┘ └─────────┘
 ```
 
-**Quy tắc nghiệp vụ dùng chung.** Cả hai đường dùng cùng ngưỡng cho: phân tầng rủi ro (Low / Medium / High / Very High), quyết định phê duyệt (APPROVE / REVIEW / REJECT), và tổn thất kỳ vọng (LGD = 0,45 theo Basel II Foundation IRB). Các quy tắc hiện được cài đặt trong `credit_risk/risk/` (batch) và inline trong `streaming/spark_streaming.py` (streaming); việc trích xuất thành module dùng chung `credit_risk/inference/` nằm trong lộ trình (§13).
+**Quy tắc nghiệp vụ dùng chung.** Cả hai đường dùng cùng ngưỡng cho: phân tầng rủi ro (Low / Medium / High / Very High), quyết định phê duyệt (APPROVE / REVIEW / REJECT), và tổn thất kỳ vọng (LGD = 0,45 — hằng số giả định, xem §8.1). Các quy tắc hiện được cài đặt trong `credit_risk/risk/` (batch) và inline trong `streaming/spark_streaming.py` (streaming); việc trích xuất thành module dùng chung `credit_risk/inference/` nằm trong lộ trình (§13).
 
 ---
 
@@ -335,6 +335,8 @@ Một lần chạy, experiment `credit_risk_platform / gbt_baseline`:
 
 ## 8. Phân tích rủi ro Basel II
 
+> **Nguồn số liệu:** mọi con số trong §8 trích trực tiếp từ [`data/08_reporting/portfolio_risk_report.json`](data/08_reporting/portfolio_risk_report.json), sinh bởi `make risk` trên model `credit_risk_gbt` **version 2** (stage `Production`), chạy ngày 2026-10-10. Công thức vốn nằm ở [`credit_risk/risk/capital.py`](credit_risk/risk/capital.py), được kiểm bằng 25 test trong [`tests/test_capital.py`](tests/test_capital.py).
+
 ### 8.1 Tổng quan danh mục (45.859 khách hàng được chấm điểm)
 
 | Chỉ số | Giá trị |
@@ -344,18 +346,41 @@ Một lần chạy, experiment `credit_risk_platform / gbt_baseline`:
 | Tổng EL (tổn thất kỳ vọng) | **950,72 M** |
 | Tỷ lệ EL danh mục | 3,47% |
 | Mean PD | 8,29% |
-| LGD (cố định, Basel II FIRB) | 45,0% |
+| LGD (hằng số **giả định**) | 45,0% |
 | Tỷ lệ vỡ nợ thực tế | 8,2% |
 
-### 8.2 Vốn kinh tế
+LGD = 0,45 là **giả định**, không phải tham số đã hiệu chỉnh: con số này thuộc Foundation IRB cho danh mục **doanh nghiệp**, mượn dùng ở đây vì chưa có mô hình LGD riêng. Basel không có Foundation IRB cho bán lẻ — bán lẻ bắt buộc dùng **A-IRB** với LGD tự ước lượng. Xem §13.
 
-| Đại lượng | M |
-|-----------|--:|
-| Tổn thất kỳ vọng (EL) | 950,72 |
-| Tổn thất ngoài kỳ vọng (UL) | 2.852,17 |
-| **Vốn kinh tế ước tính** | **4.278,25** |
+### 8.2 Vốn yêu cầu theo IRB (ước lượng)
 
-Công thức: **EL = PD × LGD × EAD** (PD từ GBT, LGD = 0,45 cố định theo Basel II Foundation IRB, EAD = `AMT_CREDIT`).
+Vốn được tính **theo từng hồ sơ** bằng hàm trọng số rủi ro bán lẻ Basel II (ASRF) rồi cộng lại, chứ không phải nhân EL với một hệ số:
+
+```
+K    = LGD · Φ[ (Φ⁻¹(PD) + √R · Φ⁻¹(0,999)) / √(1−R) ] − PD · LGD
+Vốn  = K × EAD                RWA = K × 12,5 × EAD
+R    = 0,04 (QRRE)  |  0,03·w + 0,16·(1−w), w = (1−e^(−35·PD))/(1−e^(−35))  (other retail)
+```
+
+| Đại lượng | Giá trị |
+|-----------|--------:|
+| Tổn thất kỳ vọng (EL) | 950,72 M |
+| **Vốn yêu cầu theo IRB (ước lượng)** | **1.547,84 M** |
+| RWA | 19.348,03 M |
+| Vốn / EAD | 5,648% |
+| Mật độ RWA (RWA / EAD) | 70,59% |
+| Mức tin cậy | 99,9% |
+| Sàn PD áp dụng | 0,03% |
+
+**Đối chiếu với hệ số kinh nghiệm — giả định, không phải Basel:**
+
+| Cách tính | Giá trị | So với vốn IRB |
+|-----------|--------:|---------------:|
+| 3 × EL | 2.852,17 M | 1,84× |
+| 4,5 × EL | 4.278,25 M | 2,76× |
+
+Hai dòng này là **giả định**, giữ lại chỉ để đo khoảng lệch. Không hệ số nhân EL nào thay được vốn, vì K phi tuyến theo PD của từng hồ sơ: tỷ lệ K/EL giảm đơn điệu khi PD tăng — tính chất được ghim bằng test `tests/test_capital.py::TestIrbK::test_capital_to_el_ratio_strictly_decreasing`. Các bản README trước ghi 4.278,25 M dưới tên "vốn kinh tế Basel II"; đó là 4,5 × EL với hệ số 1,5 hardcode không nguồn gốc, nay đã bỏ.
+
+Công thức EL: **EL = PD × LGD × EAD** (PD từ GBT, LGD = 0,45 giả định, EAD = `AMT_CREDIT` — proxy, xem §13).
 
 ### 8.3 Phân tầng 4 tier
 
@@ -368,20 +393,24 @@ Bằng chứng mô hình **tách rủi ro trong thực tế**, không chỉ trê
 | 🔴 High | 2.630 | 5,73% | 1.325,93 | 153,26 | 11,56% | 25,69% |
 | ⚫ **Very High** | **942** | **2,05%** | **463,93** | **94,42** | **20,35%** | **45,49%** |
 
-Đuôi mỏng (2,05% danh mục) mang tỷ lệ EL gấp **9,6 lần** tier Low — nhất quán với quan sát Basel rằng phần đuôi tiêu tốn phần lớn vốn kinh tế.
+Đuôi mỏng (2,05% danh mục) mang tỷ lệ EL gấp **9,6 lần** tier Low — nhất quán với quan sát Basel rằng phần đuôi tiêu tốn phần lớn vốn.
 
 ### 8.4 Stress testing vĩ mô
 
 Bốn kịch bản nhân hệ số áp lên PD và LGD:
 
-| Kịch bản | PD× | LGD× | Tổng EL (M) | Tỷ lệ EL | Vốn (M) | KH rủi ro cao |
-|----------|----:|-----:|------------:|---------:|--------:|--------------:|
-| Cơ sở | 1,0 | 1,0 | 950,72 | 3,47% | 2.852,17 | 3.572 |
-| Suy thoái nhẹ | 1,5 | 1,1 | 1.567,68 | 5,72% | 4.703,05 | 7.255 |
-| Khủng hoảng kiểu 2008 | 2,5 | 1,3 | 3.047,41 | 11,12% | 9.142,22 | 14.799 |
-| **Thiên nga đen** | **4,0** | **1,5** | **5.376,49** | **19,62%** | **16.129,48** | **24.623** |
+| Kịch bản | PD× | LGD× | Tổng EL (M) | Tỷ lệ EL | Vốn IRB (M) | KH rủi ro cao |
+|----------|----:|-----:|------------:|---------:|------------:|--------------:|
+| Cơ sở | 1,0 | 1,0 | 950,72 | 3,47% | 1.547,84 | 3.572 |
+| Suy thoái nhẹ | 1,5 | 1,1 | 1.567,68 | 5,72% | 1.858,43 | 7.255 |
+| Khủng hoảng kiểu 2008 | 2,5 | 1,3 | 3.047,41 | 11,12% | 2.434,81 | 14.799 |
+| **Thiên nga đen** | **4,0** | **1,5** | **5.376,49** | **19,62%** | **3.013,33** | **24.623** |
+
+Cột vốn dùng cùng hàm K với §8.2, chỉ thay PD và LGD bằng giá trị đã stress (hệ số tương quan R tính lại từ PD đã stress, đúng như Basel quy định) — nên hai mục không thể lệch nhau về định nghĩa.
 
 Ở kịch bản thiên nga đen, EL tăng **5,66 lần** và nhóm rủi ro cao tăng **~7 lần** — ước lượng PD tại một thời điểm, dù cân chỉnh tốt đến đâu, là chưa đủ nếu thiếu tầng stress testing.
+
+**Vì sao vốn IRB tăng chậm hơn EL khi stress?** Đây không phải dấu hiệu mô hình đánh giá thấp rủi ro, mà là hệ quả trực tiếp của định nghĩa. Công thức K **trừ đi** `PD × LGD`, nên nó chỉ đo tổn thất **ngoài** kỳ vọng — phần vượt quá mức đã dự phòng. Khi PD tăng, tổn thất ở mức tin cậy 99,9% tiến dần tới trần `LGD × EAD`, trong khi EL vẫn tăng gần như tuyến tính theo PD, nên hiệu số giữa hai đại lượng co lại: rủi ro tăng thêm chuyển dần từ "bất ngờ" sang "đã biết trước". Hệ số tương quan tài sản R theo §328 cũng giảm khi PD tăng, làm K phẳng thêm. Vì vậy hai cột EL và Vốn IRB phải đọc **cùng nhau**: dưới stress, phần rủi ro tăng thêm hiện ra ở EL (tức ở dự phòng), còn vốn chỉ phủ phần vượt ngoài dự phòng đó.
 
 ---
 
@@ -561,13 +590,14 @@ HDFS NameNode `:9870` · YARN RM `:8088` · Spark UI `:4040` · MLflow `:5000` �
 | KS | **0,4016** (> ngưỡng 0,30) | ✅ MLflow |
 | Cân chỉnh (mean PD vs thực tế) | 8,29% vs 8,2% | ✅ Xác minh |
 | EL danh mục | 950,72 M | ✅ Báo cáo JSON |
-| Vốn kinh tế Basel II | 4.278,25 M | ✅ Báo cáo JSON |
+| Vốn yêu cầu theo IRB (ước lượng) | 1.547,84 M | ✅ Báo cáo JSON |
+| RWA / mật độ RWA | 19.348,03 M / 70,59% | ✅ Báo cáo JSON |
 | 4 kịch bản stress | EL ×1,0 → ×5,66 | ✅ Báo cáo JSON |
 | Streaming đầu-cuối (demo scorer) | 30 hồ sơ / cửa sổ 1 phút | ✅ Console |
 | Quyết định drift | `CONTINUE_MONITORING` (không drift) | ✅ Báo cáo JSON |
 | Đặc trưng Kruskal–Wallis đứng đầu | EXT_SOURCE_3 (H = 4.672,97) | ✅ MLflow |
 
-Bằng chứng chính: 5 báo cáo JSON trong `data/08_reporting/` và báo cáo kỹ thuật trong `documents/`.
+Bằng chứng chính: 5 báo cáo JSON trong `data/08_reporting/` và báo cáo kỹ thuật trong `documents/`. Toàn bộ số liệu rủi ro (§8) lấy từ model `credit_risk_gbt` **version 2**, stage `Production`.
 
 ---
 
@@ -589,6 +619,12 @@ Liệt kê có chủ đích — mọi khẳng định phía trên đều đượ
 
 - Chưa công bố kết quả ablation — không thể khẳng định "+X điểm phần trăm ROC-AUC nhờ join đa bảng" khi thiếu lần chạy đối chứng (`ablation_pipeline.py` tồn tại cho mục đích này).
 - Một lần huấn luyện duy nhất — mọi chỉ số là ước lượng điểm, không có khoảng tin cậy cross-validation.
+- Vốn IRB (§8.2) là **ước lượng**, đứng trên bốn giả định cần nêu rõ khi bảo vệ số:
+  - **Phân lớp tài sản** suy ra từ `NAME_CONTRACT_TYPE`: `Revolving loans` → QRRE (R = 0,04), còn lại → other retail (R theo §328, phụ thuộc PD). Đây là phép gán hợp lý theo dữ liệu có sẵn, không phải phân lớp do bộ phận rủi ro xác nhận.
+  - **LGD = 0,45 là hằng số giả định** (tham số Foundation IRB của danh mục doanh nghiệp). Bán lẻ theo Basel bắt buộc A-IRB với LGD tự ước lượng — repo chưa có mô hình LGD.
+  - **PD là point-in-time** trên một tập test, không phải PD bình quân qua chu kỳ (through-the-cycle) như IRB yêu cầu.
+  - **EAD = `AMT_CREDIT` là proxy**, chưa có CCF (credit conversion factor) cho phần hạn mức chưa giải ngân.
+  - Sàn PD 0,03% theo Basel **đã** được áp; không có điều chỉnh kỳ hạn vì bán lẻ không áp dụng.
 - Stress test dùng hệ số nhân cố định; chưa có mô hình vệ tinh vĩ mô nối với GDP/thất nghiệp.
 - Ngưỡng tái huấn luyện theo quy tắc kinh nghiệm Siddiqi, chưa dùng khoảng tin cậy bootstrap.
 

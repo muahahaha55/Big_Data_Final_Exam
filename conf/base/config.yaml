@@ -140,8 +140,37 @@ risk:
 
   expected_loss:
     lgd_method: fixed
-    lgd_fixed: 0.45         # Basel II Foundation IRB
-    ead_column: AMT_CREDIT
+    # ASSUMPTION: 0.45 is the Basel II *Foundation IRB corporate* value, borrowed
+    # here as a constant. Retail IRB has no foundation approach (retail is A-IRB
+    # only), so this stands in for an own-estimate LGD model we do not have.
+    lgd_fixed: 0.45
+    ead_column: AMT_CREDIT   # ASSUMPTION: proxy for EAD, no CCF for undrawn limits
+
+  # Basel II IRB capital — retail risk-weight function (ASRF).
+  # Regulatory formula constants, not tunable business knobs. See
+  # credit_risk/risk/capital.py and README §8.2.
+  capital:
+    confidence_level: 0.999      # Basel II: 99.9th percentile, 1-year horizon
+    pd_floor: 0.0003             # Basel II: 0.03% PD floor
+    pd_cap: 0.9999               # numerical guard, Phi^-1(1) is undefined
+    rwa_multiplier: 12.5         # RWA = K x 12.5 x EAD (8% minimum capital ratio)
+
+    qrre_correlation: 0.04       # §329 qualifying revolving retail
+    other_retail_r_min: 0.03     # §328 R ranges 0.03 (high PD) ...
+    other_retail_r_max: 0.16     #      ... to 0.16 (low PD)
+    other_retail_k_factor: 35.0  #      exponential weight exp(-35 x PD)
+
+    # ASSUMPTION (documented in README §8.2): contract type -> exposure class.
+    # Revolving loans -> QRRE, everything else -> other retail.
+    contract_type_column: NAME_CONTRACT_TYPE
+    qrre_contract_types: ["Revolving loans"]
+
+    # Legacy EL-multiple heuristic. ASSUMPTION, not Basel. Reported in the JSON
+    # only as a cross-check to quantify how far it lands from the IRB formula;
+    # it is never the headline number.
+    rule_of_thumb:
+      ul_multiple_of_el: 3.0
+      ec_multiple_of_ul: 1.5
 
   stress_testing:
     scenarios:
