@@ -66,7 +66,9 @@ Bảng chính là `application_train` (mỗi dòng một hồ sơ vay). Sáu b�
 | **Tổng** | **~58,4M** | — | | |
 
 **Nhãn:** `TARGET ∈ {0, 1}` — bằng 1 nếu khách hàng gặp khó khăn thanh toán ở các kỳ trả góp đầu.
-Cân bằng lớp: 282.686 không vỡ nợ (91,9%) so với 24.825 vỡ nợ (8,1%) ⇒ bắt buộc dùng class weighting (`weightCol`) để tránh mô hình tầm thường dự đoán toàn 0.
+Cân bằng lớp: 282.686 không vỡ nợ (91,9%) so với 24.825 vỡ nợ (8,1%) ⇒ accuracy không dùng được làm chỉ số chính (đoán toàn 0 đã cho ~92%), nên mọi đánh giá dựa trên **ROC-AUC / PR-AUC / KS**.
+
+> **Lưu ý:** mô hình hiện **không** áp dụng class weighting. `conf/base/config.yaml` có khai `models.imbalance.method: class_weight`, nhưng tham số này **chưa được code nào đọc** và không classifier nào được truyền `weightCol` — xem §13.
 
 **Các đặc trưng dự báo mạnh nhất** (xếp hạng Kruskal–Wallis, §10):
 
@@ -182,7 +184,7 @@ Big_Data_Final_Exam/
 │   │   ├── pipeline.py             # Spark ML pipeline (Imputer → OHE → Scaler → Assembler)
 │   │   └── kruskal_selection.py    # Xếp hạng đặc trưng Kruskal–Wallis
 │   ├── models/
-│   │   ├── trainer.py              # GBT trainer với class weighting
+│   │   ├── trainer.py              # Trainer GBT/RF/LR + log MLflow
 │   │   ├── registry.py             # Đăng ký MLflow
 │   │   └── explainer.py            # Feature attribution (Saabas) — chưa nối vào pipeline
 │   ├── risk/
@@ -322,7 +324,7 @@ Pipeline được **fit chỉ trên tập huấn luyện** và áp dụng nguyê
 
 ### 7.3 Vì sao chọn Spark MLlib GBT
 
-Huấn luyện phân tán ngay trong runtime Spark (không xuất dữ liệu), bắt được tương tác phi tuyến giữa đặc trưng, hỗ trợ class weighting qua `weightCol`. Khoảng cách ~1–2 điểm phần trăm ROC-AUC so với LightGBM/XGBoost trên benchmark Kaggle là **đánh đổi có chủ đích** để giữ toàn bộ pipeline trong một runtime (§13).
+Huấn luyện phân tán ngay trong runtime Spark (không xuất dữ liệu) và bắt được tương tác phi tuyến giữa đặc trưng. Khoảng cách ~1–2 điểm phần trăm ROC-AUC so với LightGBM/XGBoost trên benchmark Kaggle là **đánh đổi có chủ đích** để giữ toàn bộ pipeline trong một runtime (§13). `GBTClassifier` có tham số `weightCol` cho mất cân bằng lớp, nhưng **pipeline hiện không dùng** (§13).
 
 ### 7.4 Kết quả (xác minh trong MLflow)
 
@@ -656,6 +658,7 @@ Liệt kê có chủ đích — mọi khẳng định phía trên đều đượ
 - `bureau_balance` (27,3M dòng) chưa có aggregator, chưa đóng góp đặc trưng và **không nằm trong nghiên cứu ablation** (§6, §12.1) — ablation phủ 5 bảng con, không phải 6.
 - `credit_card_balance` tạo 6 đặc trưng nhưng **cả 6 bị loại vì > 50% null**, nên đóng góp của bảng này **chưa được kiểm chứng** (§6). Cần cờ hiện diện + giá trị mặc định, hoặc hạ `missing_threshold`, mới đánh giá được.
 - `scorecard.py` (WoE/IV) và `explainer.py` có trong package nhưng chưa pipeline nào gọi.
+- **Class weighting khai trong config nhưng không được áp dụng.** `conf/base/config.yaml` đặt `models.imbalance.method: class_weight`, và `credit_risk/models/trainer.py` có hàm `add_class_weights()`, nhưng hàm đó **không được gọi ở đâu** và không classifier nào nhận `weightCol` — nên mọi model trong repo, kể cả Production (§7.4), được huấn luyện **không có** class weighting. Hệ quả cần biết khi đọc §7.4: Mean PD 8,29% ≈ tỷ lệ nền 8,2% **chính là vì** không có weighting — nếu bật cân bằng lớp 50/50 thì PD dự đoán sẽ bị đẩy lên rất cao và tính chất hiệu chuẩn này mất đi. Việc bật weighting là một quyết định mô hình riêng, có đánh đổi giữa thứ tự xếp hạng và mức hiệu chuẩn, chưa được thực hiện hay đo.
 
 **Ràng buộc nghiên cứu**
 
