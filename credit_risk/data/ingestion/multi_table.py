@@ -12,7 +12,15 @@ Joins 7 tables into a single customer-centric DataFrame:
 
 Aggregation strategy: for each child table, compute per-customer aggregates
 (count, mean, sum, min, max of key columns) and left-join back to application.
-This explodes feature count from ~120 to ~250+, lifting model AUC by ~2pp.
+
+Measured effect (data/08_reporting/ablation_report.json, cumulative ablation,
+same split/seed/hyperparams at every step): the five child tables together add
++0.0106 ROC-AUC over application_train alone, and the feature count entering
+the model goes from 85 to 112 source columns. Most of that gain comes from
+previous_application (+0.0059) and installments (+0.0046); credit_card
+contributes 0 because all six of its columns exceed the 50% null threshold and
+are dropped before training. See README §12.1 for the per-step table and the
+caveats (order-dependence, single seed, no confidence interval).
 """
 
 from __future__ import annotations

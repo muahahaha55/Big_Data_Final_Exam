@@ -207,7 +207,7 @@ Big_Data_Final_Exam/
 │   ├── etl_pipeline.py             # Load → join → split → parquet
 │   ├── training_pipeline.py        # Feature pipe → GBT → MLflow
 │   ├── evaluation_pipeline.py      # So sánh các phiên bản model đã đăng ký
-│   ├── ablation_pipeline.py        # Ablation: chỉ application_train vs đủ bảng
+│   ├── ablation_pipeline.py        # Ablation: tích lũy từng bảng (+ leave-one-out)
 │   ├── risk_pipeline.py            # Tier + EL + vốn Basel + stress
 │   ├── monitoring_pipeline.py      # PSI + KS trên đặc trưng số
 │   ├── feature_selection_pipeline.py     # Xếp hạng Kruskal–Wallis
@@ -276,17 +276,23 @@ df_child.groupBy("SK_ID_CURR") \
     )
 ```
 
-| Bảng con | Số dòng | Chiến lược tổng hợp | Đặc trưng |
-|----------|--------:|---------------------|----------:|
-| `bureau` | 1,7M | count, còn hoạt động vs đã đóng, trung bình quá hạn, tổng dư nợ | **4** |
-| `previous_application` | 1,7M | count, được duyệt vs từ chối, trung bình số tiền/kỳ hạn | **8** |
-| `installments_payments` | 13,6M | trung bình/max DPD, đếm lần trễ, đếm lần trả thiếu | **6** |
-| `credit_card_balance` | 3,8M | trung bình dư nợ, trung bình hệ số sử dụng, tổng DPD | **6** |
-| `pos_cash_balance` | 10,0M | count, max DPD, đếm tháng trễ | **5** |
+| Bảng con | Số dòng | Chiến lược tổng hợp | Đặc trưng tạo ra | **Thực vào model** |
+|----------|--------:|---------------------|----------------:|-------------------:|
+| `bureau` | 1,7M | count, còn hoạt động vs đã đóng, trung bình quá hạn, tổng dư nợ | 8 | **+8** |
+| `previous_application` | 1,7M | count, được duyệt vs từ chối, trung bình số tiền/kỳ hạn | 8 | **+8** |
+| `installments_payments` | 13,6M | trung bình/max DPD, đếm lần trễ, đếm lần trả thiếu | 6 | **+6** |
+| `credit_card_balance` | 3,8M | trung bình dư nợ, trung bình hệ số sử dụng, tổng DPD | 6 | **+0** ⚠️ |
+| `pos_cash_balance` | 10,0M | count, max DPD, đếm tháng trễ | 5 | **+5** |
+
+Cột "thực vào model" lấy từ chênh lệch `n_numeric` giữa các bước trong [`ablation_report.json`](data/08_reporting/ablation_report.json) — tức số đặc trưng **thực sự** đi vào vector huấn luyện, không phải số biểu thức aggregate viết trong code.
+
+> ⚠️ **`credit_card_balance` tạo 6 đặc trưng nhưng 0 đặc trưng vào được model.** Bảng này chỉ phủ một phần nhỏ tập khách hàng, nên sau LEFT JOIN cả 6 cột đều vượt ngưỡng `features.missing_threshold: 0.5` (bỏ cột có > 50% null) và bị loại ở `identify_feature_columns`. Bằng chứng trong JSON: bước `+credit_card` có `n_source_columns` **không đổi** (107 → 107) và cả ba chỉ số **trùng khít** với bước trước. Nghĩa là bảng này **chưa được kiểm chứng**, không phải "không có tín hiệu" — muốn dùng được thì phải hạ ngưỡng null hoặc thiết kế đặc trưng chịu được null (ví dụ cờ "có/không có thẻ" + giá trị mặc định).
+>
+> Điều này **không chỉ giới hạn trong nghiên cứu ablation**: `training_pipeline` cũng truyền đúng `features.missing_threshold` vào `identify_feature_columns` trên cùng master, nên model Production (§7.4) **nhiều khả năng cũng không có đặc trưng nào từ `credit_card_balance`**. Đây là suy luận từ code — chưa có artifact nào ghi danh sách cột của lần chạy Production — và sẽ được kiểm chứng bằng số liệu trong T1.4 (CV sẽ ghi số cột vào model từng fold).
 
 Tất cả phép nối đều là **LEFT JOIN theo `SK_ID_CURR`** — giữ lại khách hàng chưa có lịch sử (NULL được xử lý ở tầng Imputer).
 
-**Đã xác minh trên HDFS:** đầu vào 7 CSV (~58,4M dòng) → `application_train` 307.511 × 122 → sau gộp bureau 307.511 × 126 → sau toàn bộ join + đặc trưng nghiệp vụ **307.511 × ~200 cột**.
+**Đã xác minh trên HDFS:** đầu vào 7 CSV (~58,4M dòng) → `application_train` 307.511 × 122 → sau gộp bureau 307.511 × 126 → sau toàn bộ join + đặc trưng nghiệp vụ **307.511 × ~200 cột**. Ở bước đủ bảng, **112 cột** thực sự đi vào feature pipeline (99 số + 13 hạng mục, sau khi loại cột > 50% null và bỏ `SK_ID_CURR`/`TARGET`) — xem §12.
 
 > Lưu ý: `bureau_balance` (27,3M dòng) được khai báo trong `config.yaml` nhưng **chưa có aggregator** — trạng thái tháng của nó chưa đóng góp đặc trưng vào master dataset. Con số 58,4M phản ánh khối lượng raw lưu trữ và đọc, không phải khối lượng đã chuyển thành đặc trưng. Bổ sung aggregator theo nhóm DPD nằm trong lộ trình (§13).
 
@@ -332,6 +338,8 @@ Một lần chạy, experiment `credit_risk_platform / gbt_baseline`:
 | **Mean PD** | **8,29%** | ≈ tỷ lệ vỡ nợ thực tế 8,2% — **cân chỉnh tốt** (lệch < 0,1 điểm phần trăm) |
 
 Đây là ước lượng điểm từ một lần huấn luyện; chưa báo cáo phương sai cross-validation (§13).
+
+> **Bao nhiêu trong số này đến từ việc join đa bảng?** Nghiên cứu ablation tích lũy ở **§12.1** trả lời bằng số: **+0,0106 ROC-AUC** cho cả 5 bảng con gộp lại, phần lớn từ `previous_application` và `installments`. Lưu ý ablation dùng split 85/15 nên **các con số ở đó không so sánh trực tiếp được** với 0,7663 trong bảng trên.
 
 ---
 
@@ -589,6 +597,7 @@ HDFS NameNode `:9870` · YARN RM `:8088` · Spark UI `:4040` · MLflow `:5000` �
 |----------|---------|------------|
 | ETL: 7 bảng → master parquet | 307.511 × ~200 cột | ✅ Xác minh trên HDFS |
 | ROC-AUC | **0,7663** | ✅ MLflow |
+| Ablation: tổng đóng góp của 5 bảng con | **+0,0106 ROC-AUC** | ✅ Báo cáo JSON |
 | KS | **0,4016** (> ngưỡng 0,30) | ✅ MLflow |
 | Cân chỉnh (mean PD vs thực tế) | 8,29% vs 8,2% | ✅ Xác minh |
 | EL danh mục | 950,72 M | ✅ Báo cáo JSON |
@@ -599,7 +608,37 @@ HDFS NameNode `:9870` · YARN RM `:8088` · Spark UI `:4040` · MLflow `:5000` �
 | Quyết định drift | `CONTINUE_MONITORING` (không drift) | ✅ Báo cáo JSON |
 | Đặc trưng Kruskal–Wallis đứng đầu | EXT_SOURCE_3 (H = 4.672,97) | ✅ MLflow |
 
-Bằng chứng chính: 5 báo cáo JSON trong `data/08_reporting/` và báo cáo kỹ thuật trong `documents/`. Toàn bộ số liệu rủi ro (§8) lấy từ model `credit_risk_gbt` **version 2**, stage `Production`.
+### 12.1 Ablation theo từng bảng (tích lũy)
+
+Câu hỏi: **join 7 bảng có thực sự đáng không?** Thêm từng bảng một, cùng split, cùng seed, cùng hyperparams, đo lại từ đầu mỗi bước. Mọi số dưới đây trích từ [`data/08_reporting/ablation_report.json`](data/08_reporting/ablation_report.json).
+
+| # | Bước | Cột vào model | ROC-AUC | PR-AUC | KS | Δ ROC-AUC vs bước trước | Thời gian (s) |
+|--:|------|--------------:|--------:|-------:|-----:|------------------------:|--------------:|
+| 1 | `application_only` | 85 | 0,7546 | 0,2356 | 0,3775 | — | 350,7 |
+| 2 | `+bureau` | 93 | 0,7562 | 0,2391 | 0,3806 | +0,0016 | 357,8 |
+| 3 | `+previous_application` | 101 | 0,7621 | 0,2440 | 0,3884 | **+0,0059** | 1.124,5 |
+| 4 | `+installments` | 107 | 0,7667 | 0,2504 | 0,3984 | **+0,0046** | 1.112,0 |
+| 5 | `+credit_card` | 107 | 0,7667 | 0,2504 | 0,3984 | 0,0000 | 389,9 |
+| 6 | `+pos_cash` | 112 | 0,7652 | 0,2505 | 0,3971 | −0,0015 | 359,5 |
+
+**Tổng đóng góp của cả 5 bảng con: +0,0106 ROC-AUC, +0,0149 PR-AUC, +0,0196 KS** (bước 1 → bước 6). Mọi bước dùng đúng 261.691 dòng train và 45.820 dòng test — cùng một tập khách hàng, ID được ghi ra Parquet một lần ở pha precompute.
+
+**Cách đọc bảng này cho đúng — bốn giới hạn:**
+
+1. **Thứ tự thêm bảng là cố định** (`bureau → previous_application → installments → credit_card → pos_cash`), nên các con số là **đóng góp biên theo thứ tự đó**, không phải "giá trị nội tại" của từng bảng. Một bảng vào sau có thể hiện ra nhỏ chỉ vì bảng vào trước đã mang thông tin tương tự — ba bảng `installments`, `credit_card`, `pos_cash` đều mô tả lịch sử trả nợ qua `SK_ID_PREV` nên khả năng trùng lặp là cao. Đổi thứ tự sẽ ra bộ số khác. Thiết kế leave-one-out (`--mode loo`) trả lời câu hỏi khác — đóng góp **riêng có** của từng bảng — và chưa được chạy.
+2. **Không so sánh được với §7.4 (0,7663).** Ablation chia 85/15 trên `SK_ID_CURR`; model ở §7.4 dùng split 3 phần 70/15/15 chia trên master. Tập test khác nhau và tập train lớn hơn 15 điểm phần trăm, nên việc 0,7667 ở bước 4 trông "giống" 0,7663 là **trùng hợp**, không phải xác nhận lẫn nhau.
+3. **Một lần chạy, một seed, chưa có khoảng tin cậy.** GBT dùng `subsamplingRate = 0,8` nên bản thân nó có yếu tố ngẫu nhiên. **Chênh lệch dưới ~0,002 ROC-AUC chưa thể kết luận** — tức chỉ `+previous_application` (+0,0059) và `+installments` (+0,0046) là đóng góp đọc được chắc chắn; `+bureau` (+0,0016) và `+pos_cash` (−0,0015) đều nằm trong vùng chưa phân biệt được với nhiễu. Không có cơ sở để nói bảng nào "gây hại".
+4. **`+credit_card` cho Δ = 0,0000 vì các đặc trưng của nó chưa bao giờ vào model**, không phải vì nó vô dụng: cả 6 cột bị loại do > 50% null (§6). Bảng này **chưa được kiểm chứng**.
+
+Xếp hạng theo đóng góp biên (từ `marginal_ranking_by_delta_roc_auc` trong JSON): `previous_application` (+0,0059) → `installments` (+0,0046) → `bureau` (+0,0016) → `credit_card` (0,0000) → `pos_cash` (−0,0015).
+
+**Kết luận có thể bảo vệ được:** join đa bảng **có** đem lại cải thiện, nhưng là **+0,0106 ROC-AUC**, và phần lớn đến từ **hai** bảng (`previous_application`, `installments`) chứ không phải cả năm. Đây là mức cải thiện nhỏ nhưng nhất quán trên cả ba chỉ số (ROC-AUC, PR-AUC, KS cùng tăng), đổi lại chi phí hạ tầng của việc đọc và gộp ~58,4M dòng.
+
+Chạy lại: `make ablation-precompute` rồi `make ablation-step N=1` … `N=6` (mỗi bước một process; kết quả checkpoint sau từng bước nên dừng giữa chừng không mất gì).
+
+---
+
+Bằng chứng chính: 6 báo cáo JSON trong `data/08_reporting/` và báo cáo kỹ thuật trong `documents/`. Toàn bộ số liệu rủi ro (§8) lấy từ model `credit_risk_gbt` **version 2**, stage `Production`.
 
 ---
 
@@ -614,13 +653,15 @@ Liệt kê có chủ đích — mọi khẳng định phía trên đều đượ
 - Streaming chấm điểm bằng heuristic PD, không phải GBT đã huấn luyện (§9) — kiến trúc là thật, bước chấm điểm là placeholder chờ dư địa bộ nhớ.
 - Quy tắc tier/decision/EL bị lặp code giữa batch và streaming (cùng ngưỡng, hai chỗ cài đặt) — chưa tách module `credit_risk/inference/` dùng chung.
 - Đảm bảo phân phối là at-least-once, không phải exactly-once (§9.1).
-- `bureau_balance` (27,3M dòng) chưa có aggregator, chưa đóng góp đặc trưng (§6).
+- `bureau_balance` (27,3M dòng) chưa có aggregator, chưa đóng góp đặc trưng và **không nằm trong nghiên cứu ablation** (§6, §12.1) — ablation phủ 5 bảng con, không phải 6.
+- `credit_card_balance` tạo 6 đặc trưng nhưng **cả 6 bị loại vì > 50% null**, nên đóng góp của bảng này **chưa được kiểm chứng** (§6). Cần cờ hiện diện + giá trị mặc định, hoặc hạ `missing_threshold`, mới đánh giá được.
 - `scorecard.py` (WoE/IV) và `explainer.py` có trong package nhưng chưa pipeline nào gọi.
 
 **Ràng buộc nghiên cứu**
 
-- Chưa công bố kết quả ablation — không thể khẳng định "+X điểm phần trăm ROC-AUC nhờ join đa bảng" khi thiếu lần chạy đối chứng (`ablation_pipeline.py` tồn tại cho mục đích này).
 - Một lần huấn luyện duy nhất — mọi chỉ số là ước lượng điểm, không có khoảng tin cậy cross-validation.
+- **Ablation chưa có cross-validation.** Mỗi bước ở §12.1 là **một** lần chạy với **một** seed, trong khi GBT có `subsamplingRate = 0,8` nên kết quả có thành phần ngẫu nhiên. Hệ quả: chênh lệch dưới ~0,002 ROC-AUC (`+bureau` +0,0016, `+pos_cash` −0,0015) **không phân biệt được với nhiễu** và không được dùng để kết luận. Cần k-fold hoặc nhiều seed cho mỗi bước mới có khoảng dao động — xem T1.4 trong lộ trình.
+- Ablation đo **đóng góp biên theo một thứ tự thêm bảng cố định**, nên không phải "giá trị nội tại" của từng bảng; thiết kế leave-one-out (`--mode loo`, đã có trong pipeline) chưa chạy.
 - Vốn IRB (§8.2) là **ước lượng**, đứng trên bốn giả định cần nêu rõ khi bảo vệ số:
   - **Phân lớp tài sản** suy ra từ `NAME_CONTRACT_TYPE`: `Revolving loans` → QRRE (R = 0,04), còn lại → other retail (R theo §328, phụ thuộc PD). Đây là phép gán hợp lý theo dữ liệu có sẵn, không phải phân lớp do bộ phận rủi ro xác nhận.
   - **LGD = 0,45 là hằng số giả định** (tham số Foundation IRB của danh mục doanh nghiệp). Bán lẻ theo Basel bắt buộc A-IRB với LGD tự ước lượng — repo chưa có mô hình LGD.
@@ -634,14 +675,15 @@ Liệt kê có chủ đích — mọi khẳng định phía trên đều đượ
 
 1. Triển khai trên cụm Spark thật (YARN/K8s) để kiểm chứng scale-out
 2. Benchmark định lượng AQE/Kryo
-3. Công bố kết quả ablation (chỉ application_train vs đủ bảng join)
-4. K-fold CV cho khoảng tin cậy
-5. Mô hình vệ tinh vĩ mô: PD × (a + b·ΔGDP + c·ΔThất nghiệp)
-6. Phát hiện drift theo cửa sổ trượt (ngày/tuần)
-7. Feature store (Feast)
-8. Tách `credit_risk/inference/` dùng chung; thay heuristic streaming bằng `model.transform()` với GBT từ MLflow registry
-9. Sink Kafka exactly-once (ghi idempotent theo `batchId` hoặc Kafka transactions); chuyển checkpoint lên HDFS
-10. Aggregator nhóm DPD cho `bureau_balance`; nối `scorecard.py` (bảng IV) và `explainer.py` vào pipeline
+3. K-fold CV (hoặc nhiều seed) cho khoảng tin cậy — cho cả model chính và từng bước ablation
+4. Chạy ablation leave-one-out (`--mode loo`) để có đóng góp riêng có, đối chiếu với đóng góp biên ở §12.1
+5. Sửa `credit_card_balance` để các đặc trưng của nó vào được model (cờ hiện diện + giá trị mặc định)
+6. Mô hình vệ tinh vĩ mô: PD × (a + b·ΔGDP + c·ΔThất nghiệp)
+7. Phát hiện drift theo cửa sổ trượt (ngày/tuần)
+8. Feature store (Feast)
+9. Tách `credit_risk/inference/` dùng chung; thay heuristic streaming bằng `model.transform()` với GBT từ MLflow registry
+10. Sink Kafka exactly-once (ghi idempotent theo `batchId` hoặc Kafka transactions); chuyển checkpoint lên HDFS
+11. Aggregator nhóm DPD cho `bureau_balance`; nối `scorecard.py` (bảng IV) và `explainer.py` vào pipeline
 
 ---
 
