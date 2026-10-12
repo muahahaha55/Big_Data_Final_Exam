@@ -7,6 +7,24 @@ random_seed: 42
 # ────────────────────────────────────────────────────────────────
 # Data
 # ────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────
+# Spark session (read by credit_risk/utils/spark.py — affects EVERY pipeline)
+# ────────────────────────────────────────────────────────────────
+spark:
+  # local[1] per the 3.8 GB VM constraint: in local mode driver and executor
+  # are the SAME JVM, so every concurrent task competes for driver_memory.
+  # More cores means more peak heap, not more throughput, on this box.
+  master: local[1]
+  driver_memory: 2g
+  # NOTE: ignored in local mode (no separate executor JVM). Kept for the day
+  # this runs on YARN/K8s.
+  executor_memory: 1g
+  # 50 suits the 30M-row precompute aggregations. For the small joined master
+  # (~307k rows) it over-partitions — lower it to 8–16 if the ablate phase
+  # looks task-overhead bound.
+  shuffle_partitions: 50
+  default_parallelism: 8
+
 data:
   target_column: TARGET
   id_column: SK_ID_CURR
@@ -23,6 +41,7 @@ data:
       path: data/01_raw/application_train.csv
       primary_key: SK_ID_CURR
       required: true
+      expected_rows: 307511    # verified by the ablation precompute phase
     bureau:
       path: data/01_raw/bureau.csv
       primary_key: SK_ID_BUREAU

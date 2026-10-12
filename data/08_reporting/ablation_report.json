@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "mode": "cumulative",
+  "generated_at": "2026-10-12T06:21:54.318182+00:00",
+  "config_fingerprint": "sha256:0e8a211dcefcaf73e5268263f3269562a7592381510e38a7b3a4c570c0d64b28",
+  "setup": {
+    "model_type": "gbt",
+    "hyperparams": {
+      "maxIter": 100,
+      "maxDepth": 5,
+      "stepSize": 0.1,
+      "subsamplingRate": 0.8
+    },
+    "random_seed": 42,
+    "tune": false,
+    "split": {
+      "method": "randomSplit on SK_ID_CURR, persisted and shared by all steps",
+      "train_ratio": 0.85,
+      "test_ratio": 0.15,
+      "seed": 42
+    },
+    "spark": {
+      "master": "local[1]",
+      "driver_memory": "2g",
+      "shuffle_partitions": 50
+    },
+    "table_order": [
+      "bureau",
+      "previous_application",
+      "installments",
+      "credit_card",
+      "pos_cash"
+    ],
+    "mode": "cumulative",
+    "not_comparable_to": "README \u00a77 ROC-AUC 0.7663 \u2014 that model used etl_pipeline's 3-way 70/15/15 split taken on the master, not this 2-way split on IDs"
+  },
+  "note": "bureau_balance has no aggregator, so it is not part of the join or this study (see T1.3). Marginal contributions depend on the order tables are added. Metrics here are NOT comparable to README \u00a77 (different split).",
+  "table_order": [
+    "bureau",
+    "previous_application",
+    "installments",
+    "credit_card",
+    "pos_cash"
+  ],
+  "n_steps_total": 6,
+  "n_steps_completed": 6,
+  "steps": [
+    {
+      "step": 1,
+      "label": "application_only",
+      "added_table": null,
+      "removed_table": null,
+      "included_tables": [],
+      "n_source_columns": 85,
+      "n_numeric": 72,
+      "n_categorical": 13,
+      "train_rows": 261691,
+      "test_rows": 45820,
+      "roc_auc": 0.7546,
+      "pr_auc": 0.2356,
+      "ks_statistic": 0.3775,
+      "elapsed_sec": 350.7,
+      "mlflow_run_id": "eca3bf0ba877495eb835f3c0ee17a36b",
+      "completed_at": "2026-10-12T04:36:29.032408+00:00",
+      "delta_roc_auc_vs_prev": null,
+      "delta_pr_auc_vs_prev": null,
+      "delta_ks_vs_prev": null
+    },
+    {
+      "step": 2,
+      "label": "+bureau",
+      "added_table": "bureau",
+      "removed_table": null,
+      "included_tables": [
+        "bureau"
+      ],
+      "n_source_columns": 93,
+      "n_numeric": 80,
+      "n_categorical": 13,
+      "train_rows": 261691,
+      "test_rows": 45820,
+      "roc_auc": 0.7562,
+      "pr_auc": 0.2391,
+      "ks_statistic": 0.3806,
+      "elapsed_sec": 357.8,
+      "mlflow_run_id": "6a4ef4014b084e069cfe2543c8a5b82e",
+      "completed_at": "2026-10-12T04:47:21.627606+00:00",
+      "delta_roc_auc_vs_prev": 0.0016,
+      "delta_pr_auc_vs_prev": 0.0035,
+      "delta_ks_vs_prev": 0.0031
+    },
+    {
+      "step": 3,
+      "label": "+previous_application",
+      "added_table": "previous_application",
+      "removed_table": null,
+      "included_tables": [
+        "bureau",
+        "previous_application"
+      ],
+      "n_source_columns": 101,
+      "n_numeric": 88,
+      "n_categorical": 13,
+      "train_rows": 261691,
+      "test_rows": 45820,
+      "roc_auc": 0.7621,
+      "pr_auc": 0.244,
+      "ks_statistic": 0.3884,
+      "elapsed_sec": 1124.5,
+      "mlflow_run_id": "d36aaf0acee84d0f90322d0b02e346f6",
+      "completed_at": "2026-10-12T05:49:15.936139+00:00",
+      "delta_roc_auc_vs_prev": 0.0059,
+      "delta_pr_auc_vs_prev": 0.0049,
+      "delta_ks_vs_prev": 0.0078
+    },
+    {
+      "step": 4,
+      "label": "+installments",
+      "added_table": "installments",
+      "removed_table": null,
+      "included_tables": [
+        "bureau",
+        "previous_application",
+        "installments"
+      ],
+      "n_source_columns": 107,
+      "n_numeric": 94,
+      "n_categorical": 13,
+      "train_rows": 261691,
+      "test_rows": 45820,
+      "roc_auc": 0.7667,
+      "pr_auc": 0.2504,
+      "ks_statistic": 0.3984,
+      "elapsed_sec": 1112.0,
+      "mlflow_run_id": "09c46c37ab364cea9b9d213ebabe256b",
+      "completed_at": "2026-10-12T06:08:31.855056+00:00",
+      "delta_roc_auc_vs_prev": 0.0046,
+      "delta_pr_auc_vs_prev": 0.0064,
+      "delta_ks_vs_prev": 0.01
+    },
+    {
+      "step": 5,
+      "label": "+credit_card",
+      "added_table": "credit_card",
+      "removed_table": null,
+      "included_tables": [
+        "bureau",
+        "previous_application",
+        "installments",
+        "credit_card"
+      ],
+      "n_source_columns": 107,
+      "n_numeric": 94,
+      "n_categorical": 13,
+      "train_rows": 261691,
+      "test_rows": 45820,
+      "roc_auc": 0.7667,
+      "pr_auc": 0.2504,
+      "ks_statistic": 0.3984,
+      "elapsed_sec": 389.9,
+      "mlflow_run_id": "080e26d2a10b4e2b817aba013fa12f19",
+      "completed_at": "2026-10-12T06:15:42.421061+00:00",
+      "delta_roc_auc_vs_prev": 0.0,
+      "delta_pr_auc_vs_prev": 0.0,
+      "delta_ks_vs_prev": 0.0
+    },
+    {
+      "step": 6,
+      "label": "+pos_cash",
+      "added_table": "pos_cash",
+      "removed_table": null,
+      "included_tables": [
+        "bureau",
+        "previous_application",
+        "installments",
+        "credit_card",
+        "pos_cash"
+      ],
+      "n_source_columns": 112,
+      "n_numeric": 99,
+      "n_categorical": 13,
+      "train_rows": 261691,
+      "test_rows": 45820,
+      "roc_auc": 0.7652,
+      "pr_auc": 0.2505,
+      "ks_statistic": 0.3971,
+      "elapsed_sec": 359.5,
+      "mlflow_run_id": "9d263fb7b4f849c0ba963b4c377e1770",
+      "completed_at": "2026-10-12T06:21:54.317790+00:00",
+      "delta_roc_auc_vs_prev": -0.0015,
+      "delta_pr_auc_vs_prev": 0.0001,
+      "delta_ks_vs_prev": -0.0013
+    }
+  ],
+  "total_lift_vs_application_only": {
+    "from": "application_only",
+    "to": "+pos_cash",
+    "roc_auc": 0.0106,
+    "pr_auc": 0.0149,
+    "ks": 0.0196
+  },
+  "marginal_ranking_by_delta_roc_auc": [
+    {
+      "table": "previous_application",
+      "delta_roc_auc": 0.0059
+    },
+    {
+      "table": "installments",
+      "delta_roc_auc": 0.0046
+    },
+    {
+      "table": "bureau",
+      "delta_roc_auc": 0.0016
+    },
+    {
+      "table": "credit_card",
+      "delta_roc_auc": 0.0
+    },
+    {
+      "table": "pos_cash",
+      "delta_roc_auc": -0.0015
+    }
+  ]
+}
