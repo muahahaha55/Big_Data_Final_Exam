@@ -63,12 +63,9 @@ Run:
 from __future__ import annotations
 
 import argparse
-import os
-import socket
 import time
 from datetime import datetime, timezone
 from typing import Sequence
-from urllib.parse import urlparse
 
 from credit_risk.ablation import (
     DEFAULT_TABLE_ORDER,
@@ -100,6 +97,7 @@ from credit_risk.features.pipeline import (
     identify_feature_columns,
 )
 from credit_risk.models.trainer import train_model
+from credit_risk.reporting import require_mlflow
 from credit_risk.utils import get_spark, stop_spark
 from credit_risk.utils.logging import configure_logging, get_logger
 
@@ -134,84 +132,6 @@ assert list(CHILD_TABLES) == DEFAULT_TABLE_ORDER, (
 # ══════════════════════════════════════════════════════════════
 # Preflight
 # ══════════════════════════════════════════════════════════════
-
-_PREFLIGHT_TCP_TIMEOUT_SEC = 3.0
-
-
-def _check_tcp_reachable(uri: str) -> None:
-    """Fail immediately if an http(s) tracking URI refuses a TCP connection.
-
-    Needed because MlflowClient retries a dead host seven times with backoff
-    (over two minutes observed), and the point of a preflight is to stop *now*.
-    """
-    parsed = urlparse(uri)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return   # file:, sqlite:, databricks: … nothing to probe
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        with socket.create_connection(
-            (parsed.hostname, port), timeout=_PREFLIGHT_TCP_TIMEOUT_SEC
-        ):
-            return
-    except OSError as e:
-        raise RuntimeError(
-            f"MLflow at {uri} is not reachable: {type(e).__name__}: {e}\n"
-            "Every ablation step opens an MLflow run, so the study would die "
-            "on the first step.\n"
-            "Start the tracking server before launching, or point at a local "
-            "file store:\n"
-            "  export MLFLOW_TRACKING_URI=file:./mlruns"
-        ) from e
-
-
-def require_mlflow() -> str:
-    """Fail fast unless MLflow is configured AND reachable.
-
-    `train_model` opens an MLflow run for every step even with register=False,
-    so an unreachable server kills the study — possibly hours in. MLflowRegistry
-    swallows the connection error at init and only raises later inside
-    start_run, which is why this check has to be explicit.
-    """
-    uri = os.environ.get("MLFLOW_TRACKING_URI")
-    if not uri:
-        cfg_uri = get_config().get("mlflow", {}).get("tracking_uri")
-        raise RuntimeError(
-            "MLFLOW_TRACKING_URI is not set.\n"
-            "Every ablation step opens an MLflow run, so the destination must be "
-            "explicit — otherwise six runs land somewhere unintended.\n"
-            f"  config default would be: {cfg_uri}\n"
-            "  export MLFLOW_TRACKING_URI=http://localhost:5000\n"
-            "  # or, for a local file store:\n"
-            "  export MLFLOW_TRACKING_URI=file:./mlruns"
-        )
-
-    _check_tcp_reachable(uri)
-
-    # Cap MLflow's own retries for the API probe too, so a server that accepts
-    # connections but errors out still fails in seconds rather than minutes.
-    saved = {k: os.environ.get(k) for k in
-             ("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "MLFLOW_HTTP_REQUEST_TIMEOUT")}
-    os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
-    os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "10")
-    try:
-        from mlflow import MlflowClient
-        MlflowClient(tracking_uri=uri).search_experiments(max_results=1)
-    except Exception as e:
-        raise RuntimeError(
-            f"MLflow at {uri} accepted a connection but the API call failed: "
-            f"{type(e).__name__}: {e}\n"
-            "Check the tracking server's health before launching the study."
-        ) from e
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-
-    log.info("mlflow_preflight_ok", uri=uri)
-    return uri
-
 
 # ══════════════════════════════════════════════════════════════
 # Phase 1 — precompute
@@ -488,7 +408,7 @@ def main() -> None:
     log.info("ablation_started", phase=args.phase, mode=args.mode, step=args.step)
 
     if args.phase in ("ablate", "all"):
-        require_mlflow()
+        require_mlflow("ablation study")
 
     spark = get_spark("ablation-pipeline")
     try:

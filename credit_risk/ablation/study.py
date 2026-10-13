@@ -25,13 +25,28 @@ Two study designs:
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Sequence
+
+from credit_risk.reporting.checkpoint import (
+    atomic_write_json,
+    canonical_fingerprint,
+    check_fingerprint,
+    completed_records,
+    load_report,
+)
+
+# Re-exported so existing callers keep working unchanged; the implementations
+# now live in credit_risk/reporting/checkpoint.py and are shared with T1.4.
+__all__ = [
+    "APPLICATION_ONLY", "DEFAULT_TABLE_ORDER", "FULL", "NOTE",
+    "REPORT_FILENAMES", "SCHEMA_VERSION", "StepSpec",
+    "atomic_write_json", "attach_deltas", "build_report", "build_setup",
+    "build_steps", "check_fingerprint", "completed_steps",
+    "config_fingerprint", "format_summary", "load_report", "pending_steps",
+    "summarize",
+]
 
 SCHEMA_VERSION = 1
 
@@ -152,7 +167,7 @@ def config_fingerprint(setup: dict) -> str:
     shift even with a fixed seed. Prose fields are excluded so rewording a
     note never invalidates finished steps.
     """
-    material = {
+    return canonical_fingerprint({
         "model_type": setup.get("model_type"),
         "hyperparams": setup.get("hyperparams"),
         "random_seed": setup.get("random_seed"),
@@ -162,25 +177,7 @@ def config_fingerprint(setup: dict) -> str:
         "mode": setup.get("mode"),
         "spark_master": (setup.get("spark") or {}).get("master"),
         "spark_shuffle_partitions": (setup.get("spark") or {}).get("shuffle_partitions"),
-    }
-    blob = json.dumps(material, sort_keys=True, separators=(",", ":"), default=str)
-    return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
-
-
-def check_fingerprint(report: dict | None, fingerprint: str) -> None:
-    """Refuse to extend a report produced under different settings."""
-    if not report:
-        return
-    existing = report.get("config_fingerprint")
-    if existing and existing != fingerprint:
-        raise RuntimeError(
-            "Refusing to resume: the existing report was produced with "
-            "different settings, so its steps are not comparable to new ones.\n"
-            f"  on disk: {existing}\n"
-            f"  now:     {fingerprint}\n"
-            "Re-run from scratch with --force, or restore the previous "
-            "hyperparams / seed / split / table order / spark settings."
-        )
+    })
 
 
 # ──────────────────────────────────────────────────────────────
@@ -189,13 +186,7 @@ def check_fingerprint(report: dict | None, fingerprint: str) -> None:
 
 def completed_steps(report: dict | None) -> dict[int, dict]:
     """Step number → record, for steps already finished."""
-    if not report:
-        return {}
-    return {
-        int(s["step"]): s
-        for s in report.get("steps", [])
-        if isinstance(s, dict) and s.get("step") is not None
-    }
+    return completed_records(report, records_key="steps", id_key="step")
 
 
 def pending_steps(
@@ -317,30 +308,8 @@ def build_report(mode: str, setup: dict, step_records: Sequence[dict]) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────
-# Report persistence
+# Console rendering
 # ──────────────────────────────────────────────────────────────
-
-def atomic_write_json(path: Path, data: dict) -> None:
-    """Write JSON via a temp file + os.replace, so a crash cannot truncate it."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-    os.replace(tmp, path)
-
-
-def load_report(path: Path) -> dict | None:
-    """Read an existing report; None if absent or unparseable.
-
-    A truncated report must never crash a resume, so a decode error reads as
-    "no checkpoint" rather than propagating.
-    """
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-        return None
-
 
 def format_summary(report: dict) -> str:
     """Render the console table for a finished (or partial) study."""

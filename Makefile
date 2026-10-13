@@ -1,5 +1,6 @@
 .PHONY: help install install-dev clean test etl train risk drift-check pipeline notebook \
        ablation-precompute ablation-step ablation-loo-step \
+       cv-fold cv-report \
        stack-up stack-down stack-logs stream-produce stream-score stream-consume
 
 COMPOSE := docker compose -f infrastructure/docker-compose.yml
@@ -59,6 +60,18 @@ ablation-loo-step:  ## Ablation leave-one-out: chạy một bước, dùng N=<1.
 	  echo "Thiếu N. Ví dụ: make ablation-loo-step N=1   (N từ 1 đến 7)"; exit 2; \
 	fi
 	python pipelines/ablation_pipeline.py --phase ablate --mode loo --step $(N)
+
+# ── Cross-validation (T1.4) ────────────────────────────
+# Mỗi fold một process riêng để JVM trả lại heap (VM 3,8 GB).
+# Cần MLFLOW_TRACKING_URI, ví dụ: export MLFLOW_TRACKING_URI=file:./mlruns
+cv-fold:  ## CV: chạy một fold, dùng N=<1..5> (Spark)
+	@if [ -z "$(N)" ]; then \
+	  echo "Thiếu N. Ví dụ: make cv-fold N=1   (N từ 1 đến 5)"; exit 2; \
+	fi
+	python pipelines/cv_pipeline.py --phase folds --fold $(N)
+
+cv-report:  ## CV: bảng hiệu chuẩn theo decile + ECE (pandas, không Spark)
+	python pipelines/cv_pipeline.py --phase report
 
 pipeline: etl train risk  ## Chạy toàn bộ pipeline end-to-end
 

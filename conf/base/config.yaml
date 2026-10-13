@@ -122,6 +122,7 @@ models:
     num_folds: 3
     metric: areaUnderROC
     grids:
+
       gbt:
         maxDepth: [3, 5, 7]
         maxIter: [50, 100]
@@ -131,6 +132,20 @@ models:
       logistic:
         regParam: [0.001, 0.01, 0.1]
         elasticNetParam: [0.0, 0.5]
+
+# ────────────────────────────────────────────────────────────────
+# Cross-validation (T1.4) — read by pipelines/cv_pipeline.py
+# ────────────────────────────────────────────────────────────────
+cv:
+  # k=5 trains each fold on ~68% of master, close to the ~70% the Production
+  # run used, and gives a half-width factor t*/sqrt(k) of 1.242 against 2.484
+  # at k=3 — better on both comparability and precision.
+  k_folds: 5
+  confidence_level: 0.95
+  n_deciles: 10
+  # Pool is train.parquet + val.parquet; test.parquet is never read, so it
+  # stays a clean hold-out. Folds are stratified on data.target_column and
+  # ordered by xxhash64(id, random_seed) — see credit_risk/cv/study.py.
 
 # ────────────────────────────────────────────────────────────────
 # MLflow
