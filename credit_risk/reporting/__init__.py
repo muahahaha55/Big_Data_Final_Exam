@@ -19,8 +19,18 @@ from credit_risk.reporting.checkpoint import (
     load_report,
 )
 from credit_risk.reporting.mlflow_preflight import require_mlflow
+from credit_risk.reporting.oof import (
+    cv_fold_mean,
+    join_attributes,
+    load_attributes,
+    load_oof,
+)
 
 __all__ = [
+    "cv_fold_mean",
+    "join_attributes",
+    "load_attributes",
+    "load_oof",
     "atomic_write_json",
     "canonical_fingerprint",
     "check_fingerprint",

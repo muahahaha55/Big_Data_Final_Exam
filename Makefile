@@ -85,6 +85,12 @@ baseline:  ## Baseline đối chứng; V=<tên biến thể> để chạy một 
 segments:  ## Validation theo phân khúc trên dự đoán out-of-fold
 	python pipelines/segment_pipeline.py
 
+# ── Ngưỡng cắt theo chi phí (P1.1) ───────────────────
+# Cần cv-fold xong trước (phải dùng dự đoán out-of-fold, không dùng test.parquet).
+# Không Spark, không huấn luyện lại.
+threshold:  ## Ngưỡng cắt theo chi phí trên dự đoán out-of-fold
+	python pipelines/threshold_pipeline.py
+
 pipeline: etl train risk  ## Chạy toàn bộ pipeline end-to-end
 
 # ── Notebooks ──────────────────────────────────────────────────

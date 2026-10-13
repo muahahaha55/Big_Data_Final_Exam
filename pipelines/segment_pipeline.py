@@ -30,6 +30,7 @@ from credit_risk.config import get_config, project_root
 from credit_risk.cv import completed_folds
 from credit_risk.cv.study import REPORT_FILENAMES
 from credit_risk.reporting import atomic_write_json, load_report
+from credit_risk.reporting.oof import join_attributes, load_attributes, load_oof
 from credit_risk.segments import (
     REPORT_FILENAME,
     build_dimension,
@@ -54,112 +55,6 @@ _CV_REPORT = _REPORT_DIR / REPORT_FILENAMES["cv"]
 
 
 # ══════════════════════════════════════════════════════════════
-# Inputs
-# ══════════════════════════════════════════════════════════════
-
-def load_oof(cv_report: dict):
-    """Concatenate the per-fold out-of-fold predictions.
-
-    Cross-checks the row count against the `n_valid` the folds recorded, so a
-    stale Parquet file left over from an earlier run cannot silently become
-    the population every segment number is computed on.
-    """
-    import pandas as pd
-
-    folds = sorted(completed_folds(cv_report))
-    if not folds:
-        raise RuntimeError(
-            f"{_CV_REPORT} records no finished folds — run "
-            "`make cv-fold N=1` … `N=5` first"
-        )
-
-    frames = []
-    for fold in folds:
-        path = _OOF_DIR / f"fold_{fold}.parquet"
-        if not path.exists():
-            raise FileNotFoundError(
-                f"fold {fold} is recorded as finished but {path} is missing"
-            )
-        frames.append(pd.read_parquet(path))
-
-    oof = pd.concat(frames, ignore_index=True)
-
-    expected = sum(int(f.get("n_valid") or 0)
-                   for f in cv_report.get("folds", [])
-                   if int(f.get("fold", -1)) in folds)
-    if expected and len(oof) != expected:
-        raise RuntimeError(
-            f"out-of-fold files hold {len(oof)} rows but cv_report.json "
-            f"records {expected} validation rows across folds {folds}. The "
-            "Parquet files are from a different run — delete "
-            f"{_OOF_DIR} and re-run the folds."
-        )
-
-    log.info("segments_oof_loaded", rows=len(oof), folds=folds)
-    return oof, folds
-
-
-def load_attributes(columns: list[str], id_col: str):
-    """Read only the segment columns from the CV pool, via column pruning.
-
-    The pool is `train.parquet ∪ val.parquet`, exactly what T1.4 drew folds
-    from, so every out-of-fold id must be found here. Reading five columns
-    instead of 112 keeps this inside a few hundred MB on the 3.8 GB VM.
-    """
-    import pandas as pd
-
-    wanted = [id_col] + [c for c in columns if c != id_col]
-    frames = []
-    for name in ("train", "val"):
-        path = _MODEL_INPUT / f"{name}.parquet"
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Missing {path} — the segment attributes come from the same "
-                "CV pool T1.4 used. Run `make etl` first."
-            )
-        try:
-            frames.append(pd.read_parquet(path, columns=wanted))
-        except Exception as exc:                      # narrow message, wide catch
-            raise RuntimeError(
-                f"could not read {wanted} from {path}: {exc}. Check that every "
-                "segments.dimensions column exists in the master dataset."
-            ) from exc
-
-    attrs = pd.concat(frames, ignore_index=True)
-    dup = int(attrs[id_col].duplicated().sum())
-    if dup:
-        raise RuntimeError(
-            f"{dup} duplicate {id_col} values in the CV pool — an aggregate "
-            "join fanned out and the segment join would double-count rows."
-        )
-    log.info("segments_attributes_loaded", rows=len(attrs), columns=wanted)
-    return attrs
-
-
-def join_attributes(oof, attrs, id_col: str):
-    """Attach the attributes to every out-of-fold prediction, or fail loudly."""
-    dup = int(oof[id_col].duplicated().sum())
-    if dup:
-        raise RuntimeError(
-            f"{dup} ids appear in more than one out-of-fold file — folds must "
-            "be disjoint"
-        )
-
-    merged = oof.merge(
-        attrs, on=id_col, how="left", validate="one_to_one", indicator=True,
-    )
-    unmatched = int((merged["_merge"] != "both").sum())
-    if unmatched:
-        raise RuntimeError(
-            f"{unmatched} of {len(merged)} out-of-fold ids have no row in "
-            "train.parquet ∪ val.parquet. The predictions and the pool are "
-            "from different ETL runs; segment numbers would be computed on a "
-            "subset without saying so."
-        )
-    return merged.drop(columns=["_merge"])
-
-
-# ══════════════════════════════════════════════════════════════
 # Orchestration
 # ══════════════════════════════════════════════════════════════
 
@@ -177,9 +72,13 @@ def run_segments() -> dict:
             "T1.4 produced. Run `make cv-fold N=1` … `N=5` first."
         )
 
-    oof, folds = load_oof(cv_report)
-    attrs = load_attributes(source_columns(specs), id_col)
+    oof, folds = load_oof(cv_report, _OOF_DIR, _CV_REPORT)
+    attrs = load_attributes(
+        source_columns(specs), id_col, _MODEL_INPUT,
+        hint="every segments.dimensions column",
+    )
     merged = join_attributes(oof, attrs, id_col)
+    log.info("segments_inputs_ready", oof_rows=len(merged), folds=folds)
 
     targets = merged[target_col].astype(int).tolist()
     scores = merged["pd_score"].astype(float).tolist()

@@ -205,6 +205,27 @@ baseline:
       description: "Same three features, same model as the real pipeline"
 
 # ────────────────────────────────────────────────────────────────
+# Cost-based cut-off (P1.1) — read by pipelines/threshold_pipeline.py
+# ────────────────────────────────────────────────────────────────
+# Turns the PD score into a decision. Sweeps thresholds over the T1.4
+# out-of-fold predictions; no training, no Spark.
+threshold:
+  # ASSUMPTION, and the one that moves the answer most: expected margin on a
+  # PERFORMING loan as a fraction of EAD over its life, net of funding and
+  # operating cost. Nothing in Home Credit measures this, so several values are
+  # swept and a conclusion only counts if it survives all of them.
+  # Break-even PD = m / (m + LGD), so with LGD 0.45 these give
+  # 0.0426 / 0.1000 / 0.1509 / 0.2105.
+  margin_rates: [0.02, 0.05, 0.08, 0.12]
+  grid_points: 200     # candidate thresholds, placed at score quantiles
+  curve_points: 40     # points kept in the JSON curve, to stay readable
+  plateau_n_se: 1.0    # thresholds within this many PAIRED standard errors
+                       # of the best count as indistinguishable from it
+  # The policy being compared against comes from risk.segmentation.thresholds
+  # plus the decision rule in streaming/spark_streaming.py:156-158 — not
+  # duplicated here, so there is one source of truth.
+
+# ────────────────────────────────────────────────────────────────
 # MLflow
 # ────────────────────────────────────────────────────────────────
 mlflow:
