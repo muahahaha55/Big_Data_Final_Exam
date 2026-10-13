@@ -174,9 +174,10 @@ class TestFoldBalance:
         check_fold_balance(fold_balance(rows, assign_folds(rows, 5, _hash()), 5))
 
     def test_check_raises_on_skewed_sizes(self):
+        """Equal positives but 20 fewer rows means the negative class is skewed."""
         bad = [{"fold": 1, "n": 100, "n_positive": 8, "default_rate": 0.08},
                {"fold": 2, "n": 80, "n_positive": 8, "default_rate": 0.1}]
-        with pytest.raises(RuntimeError, match="fold sizes differ"):
+        with pytest.raises(RuntimeError, match="negative counts differ by 20"):
             check_fold_balance(bad)
 
     def test_check_raises_when_stratification_failed(self):
@@ -592,3 +593,139 @@ def test_cv_study_has_no_spark_dependency():
     importlib.reload(credit_risk.cv.study)
     after = {m for m in sys.modules if m.split(".")[0] == "pyspark"}
     assert after == before, f"reloading cv.study imported pyspark: {after - before}"
+
+
+# ──────────────────────────────────────────────────────────────
+# Regression: production-scale counts broke check_fold_balance
+# ──────────────────────────────────────────────────────────────
+
+# Observed on the VM at `cv_pipeline --fold 1`, pool = 261,652 rows:
+#   RuntimeError: fold sizes differ by more than 1:
+#   [52331, 52331, 52331, 52330, 52329]
+VM_POOL_SIZES = [52331, 52331, 52331, 52330, 52329]
+VM_POOL_TOTAL = 261_652
+
+# Two (n_negative, n_default) splits of that pool which both reproduce the
+# failure. The first matches the master's real base rate (24,825/307,511 =
+# 8.073%); the second is the ~24,000 figure, which is actually the *master*
+# default count — in a 261,652 pool it would be 9.17%, i.e. too high.
+VM_COUNTS = [
+    pytest.param(240_529, 21_123, id="base-rate-8.07pct"),
+    pytest.param(237_654, 23_998, id="defaults-24k"),
+]
+
+
+def _balance_from_counts(n_neg: int, n_pos: int, k: int = 5) -> list[dict]:
+    """Build a balance list the way assign_folds distributes each class.
+
+    Within a class, folds 1..(n mod k) get the extra row. Mirrors the real
+    function; used where running it on 261k rows would be wasteful.
+    """
+    q_neg, r_neg = divmod(n_neg, k)
+    q_pos, r_pos = divmod(n_pos, k)
+    out = []
+    for f in range(1, k + 1):
+        neg = q_neg + (1 if f <= r_neg else 0)
+        pos = q_pos + (1 if f <= r_pos else 0)
+        out.append({"fold": f, "n": neg + pos, "n_positive": pos,
+                    "default_rate": round(pos / (neg + pos), 6)})
+    return out
+
+
+@pytest.mark.unit
+class TestProductionScaleFoldBalance:
+    @pytest.mark.parametrize("n_neg,n_pos", VM_COUNTS)
+    def test_reproduces_the_observed_fold_sizes(self, n_neg, n_pos):
+        """The real assign_folds must produce exactly what the VM reported."""
+        rows = ([(i, 1) for i in range(1, n_pos + 1)]
+                + [(i, 0) for i in range(n_pos + 1, n_pos + n_neg + 1)])
+        assert len(rows) == VM_POOL_TOTAL
+        bal = fold_balance(rows, assign_folds(rows, 5, _hash()), 5)
+        assert [b["n"] for b in bal] == VM_POOL_SIZES
+
+    @pytest.mark.parametrize("n_neg,n_pos", VM_COUNTS)
+    def test_each_class_is_still_balanced_within_one(self, n_neg, n_pos):
+        """Stratification itself was never broken — only the assertion was."""
+        bal = _balance_from_counts(n_neg, n_pos)
+        pos = [b["n_positive"] for b in bal]
+        neg = [b["n"] - b["n_positive"] for b in bal]
+        assert max(pos) - min(pos) <= 1, pos
+        assert max(neg) - min(neg) <= 1, neg
+
+    @pytest.mark.parametrize("n_neg,n_pos", VM_COUNTS)
+    def test_check_accepts_a_two_row_total_spread(self, n_neg, n_pos):
+        """A spread of 2 is the arithmetic maximum for 2 classes, not a bug."""
+        bal = _balance_from_counts(n_neg, n_pos)
+        assert max(b["n"] for b in bal) - min(b["n"] for b in bal) == 2
+        check_fold_balance(bal)        # must not raise
+
+    def test_helper_agrees_with_the_real_assignment(self):
+        """Guard: the fast helper must match assign_folds' distribution."""
+        n_neg, n_pos = 240_529, 21_123
+        rows = ([(i, 1) for i in range(1, n_pos + 1)]
+                + [(i, 0) for i in range(n_pos + 1, n_pos + n_neg + 1)])
+        real = fold_balance(rows, assign_folds(rows, 5, _hash()), 5)
+        fast = _balance_from_counts(n_neg, n_pos)
+        assert [r["n"] for r in real] == [f["n"] for f in fast]
+        assert [r["n_positive"] for r in real] == [f["n_positive"] for f in fast]
+
+    @pytest.mark.parametrize("n_neg,n_pos", VM_COUNTS)
+    def test_default_rate_spread_is_negligible(self, n_neg, n_pos):
+        """No separate rate check is needed: (a)+(b) already pin it down."""
+        bal = _balance_from_counts(n_neg, n_pos)
+        rates = [b["default_rate"] for b in bal]
+        assert max(rates) - min(rates) < 0.0001, rates   # < 0.01 pp
+
+
+@pytest.mark.unit
+class TestFoldBalanceInvariantBounds:
+    """The fix must not be looser than: class spread <= 1, total <= n_classes."""
+
+    def test_bound_b_is_implied_by_bound_a_for_well_formed_input(self):
+        """With two classes each within 1, the total cannot exceed 2.
+
+        So invariant (b) is mathematically implied by (a) here; it is kept as
+        an explicit, documented backstop rather than as the load-bearing check.
+        """
+        for n_neg in range(240_525, 240_535):
+            for n_pos in range(21_120, 21_130):
+                bal = _balance_from_counts(n_neg, n_pos)
+                sizes = [b["n"] for b in bal]
+                assert max(sizes) - min(sizes) <= 2, (n_neg, n_pos, sizes)
+                check_fold_balance(bal)
+
+    def test_bound_b_catches_a_malformed_row(self):
+        """Reachable case for (b): n disagrees with n_positive + n_negative."""
+        bal = [{"fold": 1, "n": 110, "n_positive": 8, "n_negative": 92,
+                "default_rate": 0.073},
+               {"fold": 2, "n": 100, "n_positive": 8, "n_negative": 92,
+                "default_rate": 0.08}]
+        with pytest.raises(RuntimeError, match="total fold sizes differ by 10"):
+            check_fold_balance(bal)
+
+    def test_skewed_positives_still_rejected_even_if_totals_look_fine(self):
+        """The dangerous case: totals balanced, classes not."""
+        bal = [{"fold": 1, "n": 100, "n_positive": 20, "default_rate": 0.2},
+               {"fold": 2, "n": 100, "n_positive": 2, "default_rate": 0.02}]
+        with pytest.raises(RuntimeError, match="positive"):
+            check_fold_balance(bal)
+
+    def test_skewed_negatives_rejected(self):
+        bal = [{"fold": 1, "n": 60, "n_positive": 10, "default_rate": 0.167},
+               {"fold": 2, "n": 42, "n_positive": 10, "default_rate": 0.238}]
+        with pytest.raises(RuntimeError):
+            check_fold_balance(bal)
+
+    def test_perfectly_divisible_counts_give_zero_spread(self):
+        bal = _balance_from_counts(240_000, 20_000)
+        assert len({b["n"] for b in bal}) == 1
+        check_fold_balance(bal)
+
+    def test_error_message_reports_the_actual_counts_and_the_allowance(self):
+        bal = [{"fold": 1, "n": 110, "n_positive": 8, "default_rate": 0.073},
+               {"fold": 2, "n": 100, "n_positive": 8, "default_rate": 0.08}]
+        with pytest.raises(RuntimeError) as e:
+            check_fold_balance(bal)
+        msg = str(e.value)
+        assert "102" in msg and "92" in msg      # the negative counts
+        assert "allowed 1" in msg                 # what the bound was

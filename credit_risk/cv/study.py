@@ -128,28 +128,71 @@ def fold_balance(
             "fold": f,
             "n": n,
             "n_positive": pos,
+            "n_negative": n - pos,
             "default_rate": round(pos / n, 6) if n else 0.0,
         })
     return out
 
 
-def check_fold_balance(balance: Sequence[dict], tolerance_n: int = 1) -> None:
+# A binary TARGET gives two strata; the total-size bound below scales with this.
+_N_CLASSES = 2
+
+
+def check_fold_balance(balance: Sequence[dict], max_class_skew: int = 1) -> None:
     """Assert stratification actually worked; raise loudly if it did not.
 
-    Runs against the Spark-produced assignment so a drift between the two
-    implementations fails the pipeline instead of quietly skewing the metrics.
+    Runs against the Spark-produced assignment, so a drift between it and the
+    unit-tested pure-Python rule fails the pipeline instead of quietly skewing
+    the metrics.
+
+    Two invariants, and deliberately no looser:
+
+    (a) **Each TARGET class differs by at most `max_class_skew` (1) across
+        folds.** This is what stratification actually guarantees: within a
+        class of `n_c` rows, folds 1..(n_c mod k) get one extra row.
+
+    (b) **Total fold size differs by at most `max_class_skew × n_classes`
+        (2).** Each class distributes its own remainder to the *lowest-numbered*
+        folds independently, so one fold can collect an extra row from every
+        class at once. The total spread is therefore bounded by the number of
+        classes even though each class is balanced to within 1.
+
+    Bounding (b) at 1 was wrong and rejected valid folds. Measured on the real
+    pool of 261,652 rows (240,529 non-default + 21,123 default, 8.07%):
+    240,529 mod 5 = 4 and 21,123 mod 5 = 3, so folds 1-3 gain a row from both
+    classes, fold 4 from one, fold 5 from neither — giving
+    [52331, 52331, 52331, 52330, 52329], a spread of exactly 2.
+
+    For well-formed binary input (b) is *implied* by (a) — two classes each
+    within 1 cannot sum to a spread above 2 — so it is kept as an explicit,
+    documented backstop that also catches a malformed row whose `n` disagrees
+    with `n_positive + n_negative`, not as the load-bearing check.
+
+    The per-fold default rate needs no separate bound: (a) and (b) together
+    pin it to well under 0.01 percentage points of spread at this scale.
     """
     if not balance:
         raise ValueError("empty fold balance")
-    sizes = [b["n"] for b in balance]
+
     positives = [b["n_positive"] for b in balance]
-    if max(sizes) - min(sizes) > tolerance_n:
+    negatives = [b.get("n_negative", b["n"] - b["n_positive"]) for b in balance]
+    sizes = [b["n"] for b in balance]
+
+    for label, counts in (("positive", positives), ("negative", negatives)):
+        spread = max(counts) - min(counts)
+        if spread > max_class_skew:
+            raise RuntimeError(
+                f"fold {label} counts differ by {spread} "
+                f"(allowed {max_class_skew}) — stratification failed: {counts}"
+            )
+
+    max_total_skew = max_class_skew * _N_CLASSES
+    spread = max(sizes) - min(sizes)
+    if spread > max_total_skew:
         raise RuntimeError(
-            f"fold sizes differ by more than {tolerance_n}: {sizes}")
-    if max(positives) - min(positives) > tolerance_n:
-        raise RuntimeError(
-            f"fold positive counts differ by more than {tolerance_n} — "
-            f"stratification failed: {positives}")
+            f"total fold sizes differ by {spread} (allowed {max_total_skew} = "
+            f"{max_class_skew} per class x {_N_CLASSES} classes): {sizes}"
+        )
 
 
 # ──────────────────────────────────────────────────────────────

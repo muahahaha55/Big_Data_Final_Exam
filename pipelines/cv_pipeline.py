@@ -125,7 +125,24 @@ def load_pool(spark) -> tuple[DataFrame, dict]:
     pool = train_df.unionByName(val_df)
     n_train, n_val = train_df.count(), val_df.count()
 
+    # One row per customer is load-bearing: a duplicated SK_ID_CURR would be
+    # split across folds by the window, so the same customer could end up in
+    # both the training and the validation side of one fold — leakage that
+    # inflates every metric. Checked here, in seconds, rather than in the
+    # report phase after an hour of training.
+    cfg = get_config()
+    id_col = cfg["data"]["id_column"]
+    n_distinct = pool.select(id_col).distinct().count()
+    if n_distinct != n_train + n_val:
+        raise RuntimeError(
+            f"{id_col} is not unique in the CV pool: {n_train + n_val} rows but "
+            f"{n_distinct} distinct ids ({n_train + n_val - n_distinct} duplicates). "
+            "Folds would leak the same customer into train and validation. "
+            "Check the aggregate joins in build_master_dataset for fan-out."
+        )
+
     meta = {
+        "n_distinct_ids": n_distinct,
         "n_rows": n_train + n_val,
         "n_from_train_parquet": n_train,
         "n_from_val_parquet": n_val,
@@ -190,15 +207,19 @@ def measure_fold_balance(folds: DataFrame, k: int) -> list[dict]:
              .orderBy("fold")
              .collect()
     )
-    balance = [
-        {
+    balance = []
+    for r in rows:
+        n = int(r["n"])
+        pos = int(r["n_positive"] or 0)
+        balance.append({
             "fold": int(r["fold"]),
-            "n": int(r["n"]),
-            "n_positive": int(r["n_positive"] or 0),
-            "default_rate": round(float(r["n_positive"] or 0) / int(r["n"]), 6),
-        }
-        for r in rows
-    ]
+            "n": n,
+            "n_positive": pos,
+            # Recorded so the stratification invariant is auditable from the
+            # report: each class must be balanced to within one row per fold.
+            "n_negative": n - pos,
+            "default_rate": round(pos / n, 6),
+        })
     if len(balance) != k:
         raise RuntimeError(f"expected {k} folds, assignment produced {len(balance)}")
     # Fails loudly if the Spark rule ever drifts from the tested pure-Python rule.
