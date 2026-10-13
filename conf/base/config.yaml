@@ -148,6 +148,37 @@ cv:
   # ordered by xxhash64(id, random_seed) — see credit_risk/cv/study.py.
 
 # ────────────────────────────────────────────────────────────────
+# Segment validation (P0.4) — read by pipelines/segment_pipeline.py
+# ────────────────────────────────────────────────────────────────
+# Slices the T1.4 out-of-fold predictions. No training, no Spark.
+# Support floors: with a ~8% default rate a group needs ~600 rows to hold 50
+# defaults, and an AUC built on fewer moves by whole points when one default
+# changes — below these, a group is suppressed instead of reported.
+segments:
+  min_rows: 1000
+  min_positives: 50
+  n_bins: 5          # quantile bands; edges come from the data, not from config
+  dimensions:
+    - name: contract_type
+      column: NAME_CONTRACT_TYPE
+      kind: categorical
+      description: "Cash vs revolving loans — also the QRRE mapping in README 8.2"
+    - name: gender
+      column: CODE_GENDER
+      kind: categorical
+      sensitive: true
+      description: "CODE_GENDER is an input feature (features.categorical_columns), so the model sees it"
+    - name: age_group
+      column: DAYS_BIRTH
+      kind: quantile
+      transform: days_to_years
+      description: "Age in years = -DAYS_BIRTH/365.25, cut at data quintiles"
+    - name: income_group
+      column: AMT_INCOME_TOTAL
+      kind: quantile
+      description: "AMT_INCOME_TOTAL cut at data quintiles"
+
+# ────────────────────────────────────────────────────────────────
 # Baseline comparison (P0.3) — read by pipelines/baseline_pipeline.py
 # ────────────────────────────────────────────────────────────────
 # Decomposes "is the multi-table pipeline worth it?" into the feature set vs
