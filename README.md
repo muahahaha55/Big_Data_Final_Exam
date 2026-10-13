@@ -145,6 +145,15 @@ Hai đường xử lý song song, áp dụng **cùng một bộ quy tắc nghi�
 
 **Quy tắc nghiệp vụ dùng chung.** Cả hai đường dùng cùng ngưỡng cho: phân tầng rủi ro (Low / Medium / High / Very High), quyết định phê duyệt (APPROVE / REVIEW / REJECT), và tổn thất kỳ vọng (LGD = 0,45 — hằng số giả định, xem §8.1). Các quy tắc hiện được cài đặt trong `credit_risk/risk/` (batch) và inline trong `streaming/spark_streaming.py` (streaming); việc trích xuất thành module dùng chung `credit_risk/inference/` nằm trong lộ trình (§13).
 
+> **Sơ đồ trên là luồng dữ liệu của các lệnh ở §11, không phải một hệ thống đang vận hành.** Bốn điểm cần nói rõ, tất cả kiểm được trong code:
+>
+> - **Không có đầu vào thật.** `streaming/kafka_producer.py` ở chế độ `--mode random` sinh hồ sơ bằng `random.choice()` trên vài trường (`streaming/kafka_producer.py:50-66`). Đó là fixture để chứng minh đường ống chạy, không phải ingress từ hệ thống nguồn.
+> - **Quyết định không gây hậu quả.** Kết quả chấm điểm được ghi ra topic `scoring-results` và `data/07_model_output/streaming_results`, nhưng **không module nào trong repo đọc lại chúng**. `retraining_decision.json` cũng là đầu ra cuối — không tiến trình nào tiêu thụ nó.
+> - **Không có trạng thái tích lũy.** Mỗi lần chạy dựng lại từ CSV thô: không có lịch sử điểm theo thời gian, không có hàng đợi hồ sơ chờ xét lại, không có phiên bản quyết định.
+> - **Không có vòng phản hồi.** Nhãn rủi ro thật chỉ xuất hiện sau 12+ tháng và **chỉ cho nhóm được duyệt**. `TARGET` ở đây là nhãn lịch sử Kaggle cho **toàn bộ** 307.511 hồ sơ, kể cả những hồ sơ mà một chính sách tín dụng sẽ từ chối — nên repo không có khái niệm reject inference / selection bias (xem lộ trình §13).
+>
+> Nói gọn: phần **đo lường** là thật và tái lập được; phần **vận hành** là kiến trúc đã dựng nhưng chưa có dòng đời dữ liệu thật đi qua.
+
 ---
 
 ## 4. Tech stack
@@ -294,7 +303,7 @@ Cột "thực vào model" lấy từ chênh lệch `n_numeric` giữa các bư�
 
 Tất cả phép nối đều là **LEFT JOIN theo `SK_ID_CURR`** — giữ lại khách hàng chưa có lịch sử (NULL được xử lý ở tầng Imputer).
 
-**Đã xác minh trên HDFS:** đầu vào 7 CSV (~58,4M dòng) → `application_train` 307.511 × 122 → sau gộp bureau 307.511 × 126 → sau toàn bộ join + đặc trưng nghiệp vụ **307.511 × ~200 cột**. Ở bước đủ bảng, **112 cột** thực sự đi vào feature pipeline (99 số + 13 hạng mục, sau khi loại cột > 50% null và bỏ `SK_ID_CURR`/`TARGET`) — xem §12.
+**Đã xác minh trên HDFS:** đầu vào 7 CSV (~58,4M dòng) → `application_train` **307.511 × 122**, và vẫn đúng 307.511 dòng sau mọi LEFT JOIN (pha precompute của ablation kiểm lại số dòng này). Con số truy được tiếp theo là ở **đầu vào model**: ở bước đủ bảng, **112 cột** thực sự đi vào feature pipeline (99 số + 13 hạng mục, sau khi loại cột > 50% null và bỏ `SK_ID_CURR`/`TARGET`) — trích từ [`ablation_report.json`](data/08_reporting/ablation_report.json), xem §12.1. Số cột của master sau toàn bộ join **không được ghi vào báo cáo nào**, nên README không nêu con số đó; các bản trước ghi "~200 cột" — một con số không truy được về file nào — nay đã bỏ.
 
 > Lưu ý: `bureau_balance` (27,3M dòng) được khai báo trong `config.yaml` nhưng **chưa có aggregator** — trạng thái tháng của nó chưa đóng góp đặc trưng vào master dataset. Con số 58,4M phản ánh khối lượng raw lưu trữ và đọc, không phải khối lượng đã chuyển thành đặc trưng. Bổ sung aggregator theo nhóm DPD nằm trong lộ trình (§13).
 
@@ -326,6 +335,8 @@ Pipeline được **fit chỉ trên tập huấn luyện** và áp dụng nguyê
 
 Huấn luyện phân tán ngay trong runtime Spark (không xuất dữ liệu) và bắt được tương tác phi tuyến giữa đặc trưng. Khoảng cách ~1–2 điểm phần trăm ROC-AUC so với LightGBM/XGBoost trên benchmark Kaggle là **đánh đổi có chủ đích** để giữ toàn bộ pipeline trong một runtime (§13). `GBTClassifier` có tham số `weightCol` cho mất cân bằng lớp, nhưng **pipeline hiện không dùng** (§13).
 
+**Giới hạn của lựa chọn này, cần nói trước khi ai đó hỏi:** `GBTClassifier` của Spark MLlib **không có ràng buộc đơn điệu** (monotone constraints) — chuỗi `monotone` không xuất hiện ở đâu trong `pyspark/ml/classification.py` của pyspark 3.5.0, trong khi LightGBM và XGBoost đều có tham số này. Hệ quả: model có thể học quan hệ không đơn điệu (ví dụ một khoảng thu nhập cao hơn lại cho PD cao hơn) thuần do dạng dữ liệu, và repo **chưa kiểm tra** tính đơn điệu của các quan hệ đã học. Ở scorecard bán lẻ phải trình hội đồng tín dụng hoặc cơ quan quản lý, tính đơn điệu thường là **yêu cầu bắt buộc** — đây là một trong những lý do nhiều ngân hàng vẫn dùng logistic regression trên biến đã WoE thay vì GBT.
+
 ### 7.4 Kết quả (xác minh trong MLflow)
 
 Một lần chạy, experiment `credit_risk_platform / gbt_baseline`:
@@ -340,6 +351,8 @@ Một lần chạy, experiment `credit_risk_platform / gbt_baseline`:
 | **Mean PD** | **8,29%** | ≈ tỷ lệ vỡ nợ thực tế 8,2% — **cân chỉnh tốt** (lệch < 0,1 điểm phần trăm) |
 
 Đây là ước lượng điểm từ một lần huấn luyện; chưa báo cáo phương sai cross-validation (§13).
+
+**Hyperparams chưa bao giờ được dữ liệu chọn.** Chính tên experiment `gbt_baseline` là bằng chứng: `train_model` đặt tên run theo `f"{model_type}_{'tuned' if tune else 'baseline'}"`, nên lần chạy này có `tune=False`. `conf/base/config.yaml` khai `models.tuning.enabled: true` kèm cả lưới tìm kiếm, nhưng cờ đó chỉ có hiệu lực khi truyền `--tune` cho `training_pipeline` (mặc định `tune=False`) — nên `maxIter 100 / maxDepth 5 / stepSize 0,1` là **giá trị mặc định tròn**, không phải kết quả của một phép tìm kiếm. Vì sao vẫn chấp nhận được: ablation ở §12.1 cho thấy thêm **hẳn một nguồn dữ liệu** chỉ đổi ROC-AUC khoảng 0,005, nên kỳ vọng lợi ích từ việc tune trên cùng bộ đặc trưng này khó vượt xa mức nhiễu của một seed. Nhưng đó là **lập luận về độ lớn hiệu ứng, không phải phép đo** — chưa có lần chạy `--tune` nào để đối chiếu.
 
 > **Bao nhiêu trong số này đến từ việc join đa bảng?** Nghiên cứu ablation tích lũy ở **§12.1** trả lời bằng số: **+0,0106 ROC-AUC** cho cả 5 bảng con gộp lại, phần lớn từ `previous_application` và `installments`. Lưu ý ablation dùng split 85/15 nên **các con số ở đó không so sánh trực tiếp được** với 0,7663 trong bảng trên.
 
@@ -482,6 +495,12 @@ scored_df \
 
 ## 10. Giám sát mô hình & Phát hiện drift
 
+> **Phép so sánh mặc định về cấu trúc không thể phát hiện drift.** `pipelines/monitoring_pipeline.py` lấy reference = `train.parquet`, current = `test.parquet` (`pipelines/monitoring_pipeline.py:36-37`) — **hai nửa của cùng một file tĩnh**, chia ngẫu nhiên. Hai nửa đó cùng phân phối **theo thiết kế**, nên PSI gần 0 là tính chất của phép chia, **không phải bằng chứng dữ liệu ổn định**: [`drift_report.json`](data/08_reporting/drift_report.json) cho PSI tối đa **0,0003** trên 6 đặc trưng, p-value KS nhỏ nhất **0,56**. Bộ dữ liệu **không có cột thời gian tuyệt đối** (chỉ có `DAYS_*` tương đối, đã kiểm), nên không thể dựng hai cửa sổ thời gian thật từ chính nó.
+>
+> Vậy §10 chứng minh được gì: **cơ chế** — công thức PSI/KS/JS, phát hiện hạng mục mới, và luật quyết định — chạy đầu-cuối trên dữ liệu thật và sinh ra báo cáo JSON kiểm được. Và vì `run_monitoring` nhận tham số `reference_path` / `current_path`, trỏ nó vào hai cửa sổ thật là **đổi cấu hình**, không phải viết lại.
+>
+> Mặt quan sát cũng hẹp: **6 đặc trưng số** khai trong `monitoring.drift.monitored_features` (trên 112 cột vào model) và **15 đặc trưng hạng mục** trong [`categorical_drift_report.json`](data/08_reporting/categorical_drift_report.json).
+
 Bốn phương pháp bổ trợ nhau, mỗi phương pháp bắt một kiểu drift khác nhau:
 
 ### 10.1 PSI + KS cho đặc trưng số
@@ -502,7 +521,7 @@ ORGANIZATION_TYPE    JS=0.0089  [none]
 WALLSMATERIAL_MODE   JS=0.0107  [none]
 ```
 
-Tập test chứa hạng mục mới `'Unknown'` trong `NAME_FAMILY_STATUS` — drift mà PSI số **không thể thấy**, chính là lý do tồn tại của tầng hạng mục. (Lý thuyết: arXiv:2511.03807.)
+Tập test chứa hạng mục `'Unknown'` trong `NAME_FAMILY_STATUS` mà tập train không có (`n_categories_reference` 5 → `n_categories_current` 6) — thay đổi mà PSI trên đặc trưng số **không thể thấy**, nên nó chứng minh tầng hạng mục làm đúng việc của nó. Nhưng cần gọi đúng tên hiện tượng: đây là **một hạng mục rất hiếm rơi về một phía của phép chia ngẫu nhiên**, không phải drift theo thời gian (xem khung đầu §10). (Lý thuyết: arXiv:2511.03807.)
 
 ### 10.3 Xếp hạng đặc trưng Kruskal–Wallis
 
@@ -526,6 +545,8 @@ Kết quả chạy thực trên VM (lưu tại `data/08_reporting/retraining_dec
   Severity: NONE
   Reason: No drift detected.
 ```
+
+Đọc đúng: đây là kết quả của **phép so sánh hai nửa một file tĩnh** ở khung đầu §10, nên `CONTINUE_MONITORING` chỉ chứng minh luật quyết định chạy thông — **không** chứng minh dữ liệu ổn định. Một luật quyết định chỉ được kiểm chứng thật khi đã có ít nhất một lần nó buộc phải nói `RETRAIN`; điều đó chưa xảy ra trong repo.
 
 ---
 
@@ -597,7 +618,7 @@ HDFS NameNode `:9870` · YARN RM `:8088` · Spark UI `:4040` · MLflow `:5000` �
 
 | Hạng mục | Kết quả | Trạng thái |
 |----------|---------|------------|
-| ETL: 7 bảng → master parquet | 307.511 × ~200 cột | ✅ Xác minh trên HDFS |
+| ETL: 7 bảng → master parquet | 307.511 dòng; **112 cột vào model** | ✅ Báo cáo JSON (§6) |
 | ROC-AUC | **0,7663** | ✅ MLflow |
 | Ablation: tổng đóng góp của 5 bảng con | **+0,0106 ROC-AUC** | ✅ Báo cáo JSON |
 | KS | **0,4016** (> ngưỡng 0,30) | ✅ MLflow |
@@ -607,7 +628,7 @@ HDFS NameNode `:9870` · YARN RM `:8088` · Spark UI `:4040` · MLflow `:5000` �
 | RWA / mật độ RWA | 19.348,03 M / 70,59% | ✅ Báo cáo JSON |
 | 4 kịch bản stress | EL ×1,0 → ×5,66 | ✅ Báo cáo JSON |
 | Streaming đầu-cuối (demo scorer) | 30 hồ sơ / cửa sổ 1 phút | ✅ Console |
-| Quyết định drift | `CONTINUE_MONITORING` (không drift) | ✅ Báo cáo JSON |
+| Quyết định drift | `CONTINUE_MONITORING` — trên hai nửa một file tĩnh (§10) | ✅ Báo cáo JSON |
 | Đặc trưng Kruskal–Wallis đứng đầu | EXT_SOURCE_3 (H = 4.672,97) | ✅ MLflow |
 
 ### 12.1 Ablation theo từng bảng (tích lũy)
@@ -659,10 +680,14 @@ Liệt kê có chủ đích — mọi khẳng định phía trên đều đượ
 - `credit_card_balance` tạo 6 đặc trưng nhưng **cả 6 bị loại vì > 50% null**, nên đóng góp của bảng này **chưa được kiểm chứng** (§6). Cần cờ hiện diện + giá trị mặc định, hoặc hạ `missing_threshold`, mới đánh giá được.
 - `scorecard.py` (WoE/IV) và `explainer.py` có trong package nhưng chưa pipeline nào gọi.
 - **Class weighting khai trong config nhưng không được áp dụng.** `conf/base/config.yaml` đặt `models.imbalance.method: class_weight`, và `credit_risk/models/trainer.py` có hàm `add_class_weights()`, nhưng hàm đó **không được gọi ở đâu** và không classifier nào nhận `weightCol` — nên mọi model trong repo, kể cả Production (§7.4), được huấn luyện **không có** class weighting. Hệ quả cần biết khi đọc §7.4: Mean PD 8,29% ≈ tỷ lệ nền 8,2% **chính là vì** không có weighting — nếu bật cân bằng lớp 50/50 thì PD dự đoán sẽ bị đẩy lên rất cao và tính chất hiệu chuẩn này mất đi. Việc bật weighting là một quyết định mô hình riêng, có đánh đổi giữa thứ tự xếp hạng và mức hiệu chuẩn, chưa được thực hiện hay đo.
+- **Không có ràng buộc đơn điệu.** `GBTClassifier` của Spark MLlib không hỗ trợ monotone constraints (§7.3), và repo chưa kiểm tra tính đơn điệu của các quan hệ đã học. Ở scorecard bán lẻ phải trình hội đồng tín dụng, đơn điệu thường là yêu cầu bắt buộc — muốn có thì phải đổi thuật toán hoặc chuyển sang logistic + WoE.
+- **Phát hiện drift chạy trên một split tĩnh, không phải hai cửa sổ thời gian.** Mặc định so `train.parquet` với `test.parquet` — hai nửa cùng một file — nên PSI ≈ 0 là tính chất của phép chia, không phải kết luận về độ ổn định (§10). Bộ dữ liệu không có cột ngày tuyệt đối nên không thể dựng cửa sổ thật từ chính nó. Mặt quan sát: 6 đặc trưng số trên 112 cột vào model, cộng 15 đặc trưng hạng mục.
+- **Đây chưa phải một hệ thống đang vận hành.** Không có đầu vào thật (producer sinh hồ sơ bằng `random.choice()`), quyết định ghi ra nhưng không module nào đọc lại, không có trạng thái tích lũy, không có vòng phản hồi (§3). Phần đo lường là thật; phần vận hành là kiến trúc chưa có dòng đời dữ liệu thật đi qua.
 
 **Ràng buộc nghiên cứu**
 
 - Một lần huấn luyện duy nhất — mọi chỉ số là ước lượng điểm, không có khoảng tin cậy cross-validation.
+- **Hyperparams là mặc định, chưa bao giờ được dữ liệu chọn.** `models.tuning.enabled: true` chỉ có hiệu lực khi truyền `--tune`, mà lần chạy Production là `gbt_baseline` (§7.4) — nên `maxIter 100 / maxDepth 5 / stepSize 0,1` là giá trị mặc định tròn. Lý do chấp nhận được dựa trên **độ lớn hiệu ứng đo được** (cả một nguồn dữ liệu chỉ đổi ~0,005 ROC-AUC, §12.1), không phải trên một phép đo việc tune.
 - **Ablation chưa có cross-validation.** Mỗi bước ở §12.1 là **một** lần chạy với **một** seed, trong khi GBT có `subsamplingRate = 0,8` nên kết quả có thành phần ngẫu nhiên. Hệ quả: chênh lệch dưới ~0,002 ROC-AUC (`+bureau` +0,0016, `+pos_cash` −0,0015) **không phân biệt được với nhiễu** và không được dùng để kết luận. Cần k-fold hoặc nhiều seed cho mỗi bước mới có khoảng dao động — xem T1.4 trong lộ trình.
 - Ablation đo **đóng góp biên theo một thứ tự thêm bảng cố định**, nên không phải "giá trị nội tại" của từng bảng; thiết kế leave-one-out (`--mode loo`, đã có trong pipeline) chưa chạy.
 - Vốn IRB (§8.2) là **ước lượng**, đứng trên bốn giả định cần nêu rõ khi bảo vệ số:
@@ -687,6 +712,8 @@ Liệt kê có chủ đích — mọi khẳng định phía trên đều đượ
 9. Tách `credit_risk/inference/` dùng chung; thay heuristic streaming bằng `model.transform()` với GBT từ MLflow registry
 10. Sink Kafka exactly-once (ghi idempotent theo `batchId` hoặc Kafka transactions); chuyển checkpoint lên HDFS
 11. Aggregator nhóm DPD cho `bureau_balance`; nối `scorecard.py` (bảng IV) và `explainer.py` vào pipeline
+12. Kiểm tra tính đơn điệu của quan hệ đã học; nếu cần ràng buộc đơn điệu thì so sánh GBT với logistic + WoE trên cùng split
+13. Mô phỏng vòng phản hồi / reject inference: chia hồ sơ thành các cohort theo thứ tự nhân tạo, chỉ quan sát nhãn của nhóm được duyệt, rồi đo mức suy thoái so với nhãn đầy đủ mà Kaggle cung cấp cho cả nhóm bị từ chối — thứ một ngân hàng thật không bao giờ đo được
 
 ---
 
