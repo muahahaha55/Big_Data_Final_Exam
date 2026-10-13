@@ -1,6 +1,7 @@
 .PHONY: help install install-dev clean test etl train risk drift-check pipeline notebook \
        ablation-precompute ablation-step ablation-loo-step \
        cv-fold cv-report \
+       baseline \
        stack-up stack-down stack-logs stream-produce stream-score stream-consume
 
 COMPOSE := docker compose -f infrastructure/docker-compose.yml
@@ -72,6 +73,11 @@ cv-fold:  ## CV: chạy một fold, dùng N=<1..5> (Spark)
 
 cv-report:  ## CV: bảng hiệu chuẩn theo decile + ECE (pandas, không Spark)
 	python pipelines/cv_pipeline.py --phase report
+
+# ── Baseline comparison (P0.3) ───────────────────────
+# Cần `make ablation-precompute` trước (dùng lại split của T1.2).
+baseline:  ## Baseline đối chứng; V=<tên biến thể> để chạy một cái
+	python pipelines/baseline_pipeline.py $(if $(V),--variant $(V),)
 
 pipeline: etl train risk  ## Chạy toàn bộ pipeline end-to-end
 

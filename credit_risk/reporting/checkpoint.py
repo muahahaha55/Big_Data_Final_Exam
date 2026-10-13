@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Any, Callable
 
 
 def canonical_fingerprint(material: dict) -> str:
@@ -77,19 +78,22 @@ def completed_records(
     report: dict | None,
     records_key: str = "steps",
     id_key: str = "step",
-) -> dict[int, dict]:
+    coerce: Callable[[Any], Any] = int,
+) -> dict[Any, dict]:
     """Map id → record for the parts of a study that already finished.
 
-    Tolerates malformed entries and ids that came back from JSON as strings.
+    Tolerates malformed entries. `coerce` normalises the id: `int` for studies
+    keyed by step/fold number (JSON can hand numbers back as strings), `str`
+    for studies keyed by name.
     """
     if not report:
         return {}
-    out: dict[int, dict] = {}
+    out: dict[Any, dict] = {}
     for rec in report.get(records_key, []) or []:
         if not isinstance(rec, dict) or rec.get(id_key) is None:
             continue
         try:
-            out[int(rec[id_key])] = rec
+            out[coerce(rec[id_key])] = rec
         except (TypeError, ValueError):
             continue
     return out

@@ -148,6 +148,32 @@ cv:
   # ordered by xxhash64(id, random_seed) — see credit_risk/cv/study.py.
 
 # ────────────────────────────────────────────────────────────────
+# Baseline comparison (P0.3) — read by pipelines/baseline_pipeline.py
+# ────────────────────────────────────────────────────────────────
+# Decomposes "is the multi-table pipeline worth it?" into the feature set vs
+# the model class. Reuses the persisted ablation split so the numbers sit
+# beside README §12.1. EXT_SOURCE_1 is ~56% null and the real pipeline drops
+# it via features.missing_threshold — logit_ext2_ext3 is the contrast.
+baseline:
+  variants:
+    - name: rule_ext_mean
+      model: rule
+      features: [EXT_SOURCE_1, EXT_SOURCE_2, EXT_SOURCE_3]
+      description: "No training: rank by the mean of available EXT_SOURCE"
+    - name: logit_ext2_ext3
+      model: logistic
+      features: [EXT_SOURCE_2, EXT_SOURCE_3]
+      description: "Only the EXT_SOURCE columns that pass missing_threshold"
+    - name: logit_ext_all3
+      model: logistic
+      features: [EXT_SOURCE_1, EXT_SOURCE_2, EXT_SOURCE_3]
+      description: "All three EXT_SOURCE, median-imputed"
+    - name: gbt_ext_all3
+      model: gbt
+      features: [EXT_SOURCE_1, EXT_SOURCE_2, EXT_SOURCE_3]
+      description: "Same three features, same model as the real pipeline"
+
+# ────────────────────────────────────────────────────────────────
 # MLflow
 # ────────────────────────────────────────────────────────────────
 mlflow:
